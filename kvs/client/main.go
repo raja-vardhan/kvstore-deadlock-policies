@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
-
+	"sync"
 	"github.com/rstutsman/cs6450-labs/kvs"
 )
 
@@ -25,135 +25,179 @@ func Dial(addr string) *Client {
 	return &Client{rpcClient}
 }
 
-func (client *Client) Get(key string) string {
-	request := kvs.GetRequest{
-		Key: key,
-	}
-	response := kvs.GetResponse{}
-	// start := time.Now().UnixMicro()
-	err := client.rpcClient.Call("KVService.Get", &request, &response)
-	// end := time.Now().UnixMicro()
-	// fmt.Println("Get Time", end-start)
-	if err != nil {
-		log.Fatal(err)
-	}
+// ---------------- Broker ----------------
 
-	return response.Value
+type BrokerConfig struct {
+	BatchSize    int
+	BatchTimeout time.Duration
+	Value        string
 }
 
-func (client *Client) Put(key string, value string) {
-	request := kvs.PutRequest{
-		Key:   key,
-		Value: value,
-	}
-	response := kvs.PutResponse{}
-	// start := time.Now().UnixMicro()
-	err := client.rpcClient.Call("KVService.Put", &request, &response)
-	// end := time.Now().UnixMicro()
-	// fmt.Println("Put Time", end-start)
-	if err != nil {
-		log.Fatal(err)
-	}
+type Broker struct {
+	cfg       BrokerConfig
+	client    *Client
+	in        <-chan kvs.WorkloadOp
+	wg        *sync.WaitGroup
+	opsSent   *atomic.Uint64
+	rpcErrors *atomic.Uint64
 }
 
-func (client *Client) Batch(request kvs.BatchRequest, response kvs.BatchResponse, count *int, op kvs.WorkloadOp, value ...string) bool {
-	key := fmt.Sprintf("%d", op.Key)
-	if op.IsRead {
-		request.Batch[*count] = kvs.ReqObj{Key: key, IsGet: true}
-	} else {
-		request.Batch[*count] = kvs.ReqObj{Key: key, Value: value[0], IsGet: false}
-	}
-	*count++
+func (b *Broker) run(done *atomic.Bool) {
+	defer b.wg.Done()
 
-	if *count == len(request.Batch) {
-		*count = 0
-		err := client.rpcClient.Call("KVService.Batch", &request, &response)
-		if err != nil {
-			log.Fatal(err)
-		}
-		//fmt.Println(len(request.Batch), len(response.Batch))
-		return true
-	}
-	return false
-}
-
-func (client *Client) MessageBroker(mq chan *kvs.WorkloadOp) {
-	batchSize := 100_000
+	batch := make([]kvs.ReqObj, b.cfg.BatchSize)
 	count := 0
-	reqBatch := kvs.BatchRequest{Batch: make([]kvs.ReqObj, batchSize)}
-	var respBatch kvs.BatchResponse
-	prev := time.Now().UnixMilli()
-	for {
-		op := <-mq
-		switch count {
-		case 0:
-			now := time.Now().UnixMilli()
-			fmt.Println("Time to response", now-prev)
-			prev = now
-		case batchSize - 1:
-			now := time.Now().UnixMilli()
-			fmt.Println("Time to fill", now-prev)
-			prev = now
+
+	// one reusable timer per broker
+	timer := time.NewTimer(time.Hour)
+	timer.Stop()
+	timerActive := false
+
+	resetTimer := func() {
+		if timerActive {
+			if !timer.Stop() {
+				select { case <-timer.C: default: }
+			}
 		}
-		// key := fmt.Sprintf("%d", op.Key)
-		value := strings.Repeat("x", 128)
-		if op.IsRead {
-			// go func() {
-			// client.Get(key)
-			client.Batch(reqBatch, respBatch, &count, *op)
-			// }()
-		} else {
-			// go func() {
-			// client.Put(key, value)
-			client.Batch(reqBatch, respBatch, &count, *op, value)
-			// }()
+		timer.Reset(b.cfg.BatchTimeout)
+		timerActive = true
+	}
+	stopTimer := func() {
+		if timerActive {
+			if !timer.Stop() {
+				select { case <-timer.C: default: }
+			}
+			timerActive = false
 		}
 	}
+	flush := func() {
+		if count == 0 {
+			return
+		}
+		req := kvs.BatchRequest{Batch: append([]kvs.ReqObj(nil), batch[:count]...)}
+		resp := kvs.BatchResponse{}
+		if err := b.client.rpcClient.Call("KVService.Batch", &req, &resp); err != nil {
+			b.rpcErrors.Add(1)
+		}
+		b.opsSent.Add(uint64(count))
+		count = 0
+		stopTimer()
+	}
+
+	for !done.Load() {
+		select {
+		case op, ok := <-b.in:
+			if !ok {
+				flush()
+				return
+			}
+			if op.IsRead {
+				batch[count] = kvs.ReqObj{Key: fmt.Sprintf("%d", op.Key), IsGet: true}
+			} else {
+				batch[count] = kvs.ReqObj{Key: fmt.Sprintf("%d", op.Key), Value: b.cfg.Value, IsGet: false}
+			}
+			count++
+			if count == 1 {
+				resetTimer()
+			}
+			if count == b.cfg.BatchSize {
+				flush()
+			}
+
+		case <-timer.C:
+			timerActive = false
+			flush()
+		}
+	}
+	flush()
 }
 
-func runClient(id int, hosts HostList, done *atomic.Bool, workload *kvs.Workload, resultsCh chan<- uint64) {
-	client := make([]*Client, len(hosts))
-	for i := 0; i < len(client); i++ {
-		client[i] = Dial(hosts[i])
+//----------------runClient-----------
+
+func runClient(id int, hosts HostList, done *atomic.Bool, workload string, theta float64, resultsCh chan<- uint64) {
+	clients := make([]*Client, len(hosts))
+	for i := 0; i < len(hosts); i++ {
+		clients[i] = Dial(hosts[i])
 	}
 
-	buffer := 10_000_000 // Vary buffer
-	mq := make([]chan *kvs.WorkloadOp, len(client))
-	for i := 0; i < len(mq); i++ {
-		mq[i] = make(chan *kvs.WorkloadOp, buffer)
-		// TODO: Rework to come up with a scheduling strategy here so that when 1 go routine queue to a server is waiting. we start filling a different batch request to the same server
-		go client[i].MessageBroker(mq[i])
-		go client[i].MessageBroker(mq[i])
-	}
+	// config
+	const batchSize = 8192
+	const batchTimeout = 10 * time.Millisecond
+	const brokersPerHost = 8
+	const channelBuf = 65536
+	value := strings.Repeat("x", 128)
 
-	// value := strings.Repeat("x", 128)
-	const batchSize = 1024
+	var wg sync.WaitGroup
+	var opsSent atomic.Uint64
+	var rpcErrors atomic.Uint64
+
+	// per-host broker channels
+	mq := make([][]chan kvs.WorkloadOp, len(hosts))
+	brokerCounters := make([]uint64, len(hosts)) // round-robin counters
+
+	for i := range hosts {
+		mq[i] = make([]chan kvs.WorkloadOp, brokersPerHost)
+		for b := 0; b < brokersPerHost; b++ {
+			ch := make(chan kvs.WorkloadOp, channelBuf)
+			mq[i][b] = ch
+			wg.Add(1)
+			broker := &Broker{
+				cfg: BrokerConfig{
+					BatchSize:    batchSize,
+					BatchTimeout: batchTimeout,
+					Value:        value,
+				},
+				client:    clients[i],
+				in:        ch,
+				wg:        &wg,
+				opsSent:   &opsSent,
+				rpcErrors: &rpcErrors,
+			}
+			go broker.run(done)
+		}
+	}
 
 	opsCompleted := uint64(0)
 
-	for !done.Load() {
-		for j := 0; j < batchSize; j++ {
-			op := workload.Next()
-			// key := fmt.Sprintf("%d", op.Key)
-			// start := time.Now().UnixMicro()
-			// if op.IsRead {
-			// 	// go func() {
-			// 	client[int(op.Key)%len(client)].Get(key)
-			// 	// }()
-			// } else {
-			// 	// go func() {
-			// 	client[int(op.Key)%len(client)].Put(key, value)
-			// 	// }()
-			// }
-			// end := time.Now().UnixMicro()
-			// fmt.Println("Op Time", end-start)
-			mq[int(op.Key)%len(mq)] <- &op
-			opsCompleted++
-		}
+	var genWG sync.WaitGroup
+
+	// produce ops until done
+
+	for g := 0; g < 8; g++ {
+		genWG.Add(1)
+		go func(genID int) {
+			defer genWG.Done()
+			wl := kvs.NewWorkload(workload, theta) // new workload generator
+			for !done.Load() {
+				op := wl.Next()
+				hostIdx := int(op.Key) % len(hosts)
+
+				// round-robin broker choice
+				next := atomic.AddUint64(&brokerCounters[hostIdx], 1)
+				brokerIdx := int(next) % len(mq[hostIdx])
+
+				select {
+				case mq[hostIdx][brokerIdx] <- op:
+					atomic.AddUint64(&opsCompleted, 1)
+				default:
+					// drop if channel full
+				}
+			}
+		}(g)
 	}
 
-	fmt.Printf("Client %d finished operations.\n", id)
+	// wait for generators to finish
+	genWG.Wait()
 
+	// close channels → brokers flush & exit
+	for i := range mq {
+		for _, ch := range mq[i] {
+			close(ch)
+		}
+	}
+	wg.Wait()
+
+	fmt.Printf("Client %d finished ops=%d rpcErrors=%d\n", id, opsCompleted, rpcErrors.Load())
 	resultsCh <- opsCompleted
 }
 
@@ -194,11 +238,9 @@ func main() {
 	done := atomic.Bool{}
 	resultsCh := make(chan uint64)
 
-	// host := hosts[0]
 	clientId := 0
 	go func(clientId int) {
-		workload := kvs.NewWorkload(*workload, *theta)
-		runClient(clientId, hosts, &done, workload, resultsCh)
+		runClient(clientId, hosts, &done, *workload, *theta, resultsCh)
 	}(clientId)
 
 	time.Sleep(time.Duration(*secs) * time.Second)
