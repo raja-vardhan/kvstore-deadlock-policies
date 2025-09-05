@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	_ "net/http/pprof"
 	"net/rpc"
 	"sync"
 	"time"
@@ -26,8 +27,8 @@ func (s *Stats) Sub(prev *Stats) Stats {
 }
 
 type KVService struct {
-	sync.Mutex
-	mp        map[string]string
+	sync.RWMutex
+	mp        sync.Map
 	stats     Stats
 	prevStats Stats
 	lastPrint time.Time
@@ -35,44 +36,62 @@ type KVService struct {
 
 func NewKVService() *KVService {
 	kvs := &KVService{}
-	kvs.mp = make(map[string]string)
+	// kvs.mp = make(map[string]string)
 	kvs.lastPrint = time.Now()
 	return kvs
 }
 
 func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) error {
-	kv.Lock()
-	defer kv.Unlock()
+	// kv.RLock()
+	// defer kv.RUnlock()
 
 	kv.stats.gets++
 
-	if value, found := kv.mp[request.Key]; found {
-		response.Value = value
+	if value, found := kv.mp.Load(request.Key); found {
+		response.Value = value.(string)
 	}
 
 	return nil
 }
 
 func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) error {
-	kv.Lock()
-	defer kv.Unlock()
+	// kv.Lock()
+	// defer kv.Unlock()
 
 	kv.stats.puts++
 
-	kv.mp[request.Key] = request.Value
+	kv.mp.Store(request.Key, request.Value)
 
 	return nil
 }
 
+func (kv *KVService) Batch(request *kvs.BatchRequest, response *kvs.BatchResponse) error {
+	response.Batch = make([]kvs.RespObj, len(request.Batch))
+	fmt.Println(len(request.Batch), len(response.Batch))
+	for i := 0; i < len(request.Batch); i++ {
+		response.Batch[i].IsGet = request.Batch[i].IsGet
+		if request.Batch[i].IsGet {
+			kv.stats.gets++
+			if value, found := kv.mp.Load(request.Batch[i].Key); found {
+				response.Batch[i].Value = value.(string)
+			}
+		} else {
+			kv.stats.puts++
+			kv.mp.Store(request.Batch[i].Key, request.Batch[i].Value)
+		}
+	}
+	return nil
+}
+
 func (kv *KVService) printStats() {
-	kv.Lock()
+	// kv.Lock()
 	stats := kv.stats
 	prevStats := kv.prevStats
 	kv.prevStats = stats
 	now := time.Now()
 	lastPrint := kv.lastPrint
 	kv.lastPrint = now
-	kv.Unlock()
+	// kv.Unlock()
 
 	diff := stats.Sub(&prevStats)
 	deltaS := now.Sub(lastPrint).Seconds()
@@ -84,6 +103,9 @@ func (kv *KVService) printStats() {
 }
 
 func main() {
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
 	port := flag.String("port", "8080", "Port to run the server on")
 	flag.Parse()
 
