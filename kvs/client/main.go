@@ -71,7 +71,7 @@ func (client *Client) Batch(request kvs.BatchRequest, response kvs.BatchResponse
 		if err != nil {
 			log.Fatal(err)
 		}
-		fmt.Println(len(request.Batch), len(response.Batch))
+		//fmt.Println(len(request.Batch), len(response.Batch))
 		return true
 	}
 	return false

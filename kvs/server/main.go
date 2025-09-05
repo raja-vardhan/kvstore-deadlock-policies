@@ -8,10 +8,10 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"net/rpc"
-	"sync"
+	"sync/atomic"
 	"time"
-
 	"github.com/rstutsman/cs6450-labs/kvs"
+	"github.com/orcaman/concurrent-map/v2"
 )
 
 type Stats struct {
@@ -27,8 +27,7 @@ func (s *Stats) Sub(prev *Stats) Stats {
 }
 
 type KVService struct {
-	sync.RWMutex
-	mp        sync.Map
+	mp        cmap.ConcurrentMap[string, string]
 	stats     Stats
 	prevStats Stats
 	lastPrint time.Time
@@ -36,62 +35,41 @@ type KVService struct {
 
 func NewKVService() *KVService {
 	kvs := &KVService{}
-	// kvs.mp = make(map[string]string)
+	kvs.mp = cmap.New[string]()
 	kvs.lastPrint = time.Now()
 	return kvs
 }
 
-func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) error {
-	// kv.RLock()
-	// defer kv.RUnlock()
-
-	kv.stats.gets++
-
-	if value, found := kv.mp.Load(request.Key); found {
-		response.Value = value.(string)
-	}
-
-	return nil
-}
-
-func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) error {
-	// kv.Lock()
-	// defer kv.Unlock()
-
-	kv.stats.puts++
-
-	kv.mp.Store(request.Key, request.Value)
-
-	return nil
-}
-
 func (kv *KVService) Batch(request *kvs.BatchRequest, response *kvs.BatchResponse) error {
 	response.Batch = make([]kvs.RespObj, len(request.Batch))
-	fmt.Println(len(request.Batch), len(response.Batch))
+
 	for i := 0; i < len(request.Batch); i++ {
 		response.Batch[i].IsGet = request.Batch[i].IsGet
 		if request.Batch[i].IsGet {
-			kv.stats.gets++
-			if value, found := kv.mp.Load(request.Batch[i].Key); found {
-				response.Batch[i].Value = value.(string)
+			atomic.AddUint64(&kv.stats.gets,1)
+			if value, found := kv.mp.Get(request.Batch[i].Key); found {
+				response.Batch[i].Value = value
 			}
 		} else {
-			kv.stats.puts++
-			kv.mp.Store(request.Batch[i].Key, request.Batch[i].Value)
+			atomic.AddUint64(&kv.stats.puts,1)
+			kv.mp.Set(request.Batch[i].Key, request.Batch[i].Value)
 		}
 	}
 	return nil
 }
 
 func (kv *KVService) printStats() {
-	// kv.Lock()
-	stats := kv.stats
+
+	stats := Stats{
+    		gets: atomic.LoadUint64(&kv.stats.gets),
+    		puts: atomic.LoadUint64(&kv.stats.puts),
+    	}
+
 	prevStats := kv.prevStats
 	kv.prevStats = stats
 	now := time.Now()
 	lastPrint := kv.lastPrint
 	kv.lastPrint = now
-	// kv.Unlock()
 
 	diff := stats.Sub(&prevStats)
 	deltaS := now.Sub(lastPrint).Seconds()
