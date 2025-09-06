@@ -10,8 +10,9 @@ import (
 	"net/rpc"
 	"sync/atomic"
 	"time"
+
+	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/rstutsman/cs6450-labs/kvs"
-	"github.com/orcaman/concurrent-map/v2"
 )
 
 type Stats struct {
@@ -42,28 +43,30 @@ func NewKVService() *KVService {
 
 func (kv *KVService) Batch(request *kvs.BatchRequest, response *kvs.BatchResponse) error {
 	response.Batch = make([]kvs.RespObj, len(request.Batch))
-
+	var gets, puts uint64 = 0, 0
 	for i := 0; i < len(request.Batch); i++ {
 		response.Batch[i].IsGet = request.Batch[i].IsGet
 		if request.Batch[i].IsGet {
-			atomic.AddUint64(&kv.stats.gets,1)
+			gets++
 			if value, found := kv.mp.Get(request.Batch[i].Key); found {
 				response.Batch[i].Value = value
 			}
 		} else {
-			atomic.AddUint64(&kv.stats.puts,1)
+			puts++
 			kv.mp.Set(request.Batch[i].Key, request.Batch[i].Value)
 		}
 	}
+	atomic.AddUint64(&kv.stats.gets, gets)
+	atomic.AddUint64(&kv.stats.puts, puts)
 	return nil
 }
 
 func (kv *KVService) printStats() {
 
 	stats := Stats{
-    		gets: atomic.LoadUint64(&kv.stats.gets),
-    		puts: atomic.LoadUint64(&kv.stats.puts),
-    	}
+		gets: atomic.LoadUint64(&kv.stats.gets),
+		puts: atomic.LoadUint64(&kv.stats.puts),
+	}
 
 	prevStats := kv.prevStats
 	kv.prevStats = stats
