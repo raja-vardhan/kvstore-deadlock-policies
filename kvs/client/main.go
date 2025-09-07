@@ -6,9 +6,10 @@ import (
 	"log"
 	"net/rpc"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
-	"sync"
+
 	"github.com/rstutsman/cs6450-labs/kvs"
 )
 
@@ -56,7 +57,10 @@ func (b *Broker) run(done *atomic.Bool) {
 	resetTimer := func() {
 		if timerActive {
 			if !timer.Stop() {
-				select { case <-timer.C: default: }
+				select {
+				case <-timer.C:
+				default:
+				}
 			}
 		}
 		timer.Reset(b.cfg.BatchTimeout)
@@ -65,7 +69,10 @@ func (b *Broker) run(done *atomic.Bool) {
 	stopTimer := func() {
 		if timerActive {
 			if !timer.Stop() {
-				select { case <-timer.C: default: }
+				select {
+				case <-timer.C:
+				default:
+				}
 			}
 			timerActive = false
 		}
@@ -172,16 +179,41 @@ func runClient(id int, hosts HostList, done *atomic.Bool, workload string, theta
 				op := wl.Next()
 				hostIdx := int(op.Key) % len(hosts)
 
-				// round-robin broker choice
-				next := atomic.AddUint64(&brokerCounters[hostIdx], 1)
-				brokerIdx := int(next) % len(mq[hostIdx])
+				sent := false
+				start := int(atomic.AddUint64(&brokerCounters[hostIdx], 1))
+				brokers := mq[hostIdx]
+				L := len(brokers)
 
-				select {
-				case mq[hostIdx][brokerIdx] <- op:
-					atomic.AddUint64(&opsCompleted, 1)
-				default:
-					// drop if channel full
+				// try each broker once, non-blocking (fast path)
+				for t := 0; t < L; t++ {
+					b := (start + t) % L
+					select {
+					case brokers[b] <- op:
+						sent = true
+					default:
+					}
+					if sent {
+						break
+					}
 				}
+
+				// // if all queues are full, block on the round-robin broker (backpressure)
+				// if !sent {
+				// 		b := start % L
+				// 		brokers[b] <- op
+				// }
+				// atomic.AddUint64(&opsCompleted, 1)
+
+				// // round-robin broker choice
+				// next := atomic.AddUint64(&brokerCounters[hostIdx], 1)
+				// brokerIdx := int(next) % len(mq[hostIdx])
+
+				// select {
+				// case mq[hostIdx][brokerIdx] <- op:
+				// 	atomic.AddUint64(&opsCompleted, 1)
+				// default:
+				// 	// drop if channel full
+				// }
 			}
 		}(g)
 	}
