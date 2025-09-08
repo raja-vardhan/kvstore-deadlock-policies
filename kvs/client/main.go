@@ -121,17 +121,14 @@ func (b *Broker) run(done *atomic.Bool) {
 
 //----------------runClient-----------
 
-func runClient(id int, hosts HostList, done *atomic.Bool, workload string, theta float64, resultsCh chan<- uint64) {
+func runClient(id int, hosts HostList, done *atomic.Bool, workload string, theta float64, batchSize int, batchTimeout int, brokersPerHost int, channelBuffer int,
+	generators int, resultsCh chan<- uint64) {
+
 	clients := make([]*Client, len(hosts))
 	for i := 0; i < len(hosts); i++ {
 		clients[i] = Dial(hosts[i])
 	}
 
-	// config
-	const batchSize = 8192
-	const batchTimeout = 10 * time.Millisecond
-	const brokersPerHost = 8
-	const channelBuf = 65536
 	value := strings.Repeat("x", 128)
 
 	var wg sync.WaitGroup
@@ -145,13 +142,13 @@ func runClient(id int, hosts HostList, done *atomic.Bool, workload string, theta
 	for i := range hosts {
 		mq[i] = make([]chan kvs.WorkloadOp, brokersPerHost)
 		for b := 0; b < brokersPerHost; b++ {
-			ch := make(chan kvs.WorkloadOp, channelBuf)
+			ch := make(chan kvs.WorkloadOp, channelBuffer)
 			mq[i][b] = ch
 			wg.Add(1)
 			broker := &Broker{
 				cfg: BrokerConfig{
 					BatchSize:    batchSize,
-					BatchTimeout: batchTimeout,
+					BatchTimeout: time.Duration(batchTimeout) * time.Millisecond,
 					Value:        value,
 				},
 				client:    clients[i],
@@ -170,7 +167,7 @@ func runClient(id int, hosts HostList, done *atomic.Bool, workload string, theta
 
 	// produce ops until done
 
-	for g := 0; g < 8; g++ {
+	for g := 0; g < generators; g++ {
 		genWG.Add(1)
 		go func(genID int) {
 			defer genWG.Done()
@@ -233,6 +230,11 @@ func main() {
 	theta := flag.Float64("theta", 0.99, "Zipfian distribution skew parameter")
 	workload := flag.String("workload", "YCSB-B", "Workload type (YCSB-A, YCSB-B, YCSB-C)")
 	secs := flag.Int("secs", 30, "Duration in seconds for each client to run")
+	batchSize := flag.Int("batchSize", 8192, "Number of ops per batch before flush")
+	batchTimeout := flag.Int("batchTimeout", 10, "Max time to wait before flushing a batch (in ms)")
+	brokersPerHost := flag.Int("brokersPerHost", 8, "Number of brokers per server")
+	generators := flag.Int("generators", 8, "Number of workload generator goroutines per client")
+	channelBuffer := flag.Int("channelBuffer", 65536, "Size of the buffer for queuing ops by the broker")
 	flag.Parse()
 
 	if len(hosts) == 0 {
@@ -254,7 +256,7 @@ func main() {
 
 	clientId := 0
 	go func(clientId int) {
-		runClient(clientId, hosts, &done, *workload, *theta, resultsCh)
+		runClient(clientId, hosts, &done, *workload, *theta, *batchSize, *batchTimeout, *brokersPerHost, *channelBuffer, *generators, resultsCh)
 	}(clientId)
 
 	time.Sleep(time.Duration(*secs) * time.Second)
