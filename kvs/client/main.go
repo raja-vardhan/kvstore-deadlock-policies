@@ -184,7 +184,7 @@ func runClient(id int, hosts HostList, done *atomic.Bool, workload string, theta
 				brokers := mq[hostIdx]
 				L := len(brokers)
 
-				// try each broker once, non-blocking (fast path)
+				// try each broker once, non-blocking
 				for t := 0; t < L; t++ {
 					b := (start + t) % L
 					select {
@@ -196,24 +196,6 @@ func runClient(id int, hosts HostList, done *atomic.Bool, workload string, theta
 						break
 					}
 				}
-
-				// // if all queues are full, block on the round-robin broker (backpressure)
-				// if !sent {
-				// 		b := start % L
-				// 		brokers[b] <- op
-				// }
-				// atomic.AddUint64(&opsCompleted, 1)
-
-				// // round-robin broker choice
-				// next := atomic.AddUint64(&brokerCounters[hostIdx], 1)
-				// brokerIdx := int(next) % len(mq[hostIdx])
-
-				// select {
-				// case mq[hostIdx][brokerIdx] <- op:
-				// 	atomic.AddUint64(&opsCompleted, 1)
-				// default:
-				// 	// drop if channel full
-				// }
 			}
 		}(g)
 	}
