@@ -168,12 +168,12 @@ The timeout is in milliseconds. Pass the client configuration params in the foll
 ### What Didn’t Work
 
 - **Single-request RPCs** were far too slow.
-- Concurrent Map did not boost the performance as expected since the operations are executed in separate goroutines as the locks are held for a very short amount of time.
+- Concurrent Map did not boost the performance as expected as the locks are held for a very short amount of time.
 
 ### Future Directions
 
 - Integrate **gRPC** or **raw TCP** for lower RPC latency.
-- Implement a **sharded** or **lock-free map** to reduce write-side contention and improve scalability.
+- Implement a **lock-free map** to reduce write-side contention and improve scalability.
 - Substitute the default `gob` encoding with a **custom encoding** for a fixed workload.
 
 ### Team Contributions
