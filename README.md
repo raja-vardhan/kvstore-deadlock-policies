@@ -131,6 +131,7 @@ cd <repo>
 ./run-cluster.sh
 ```
 
+### Configuration Parameters
 ---
 
 ## Reflections
@@ -138,18 +139,24 @@ cd <repo>
 ### Lessons Learned
 
 - **Batching** was the most powerful optimization for throughput.
-- **Goroutine management** was crucial: too few, reduced performance; too many, induced contention and GC overhead.
-- **Go’s runtime** made rapid prototyping easy, but careful tuning was required to sustain performance under high concurrency.
+- **Goroutine management** was very crucial: having too few goroutines, reduced the performance; whereas too many of them, induced contention and GC overhead.
+- **Sync map** was not very helpful in this implementation.
+
+### Optimizations that worked well
+
+- Batching
+- Brokers and multiple workload generators
 
 ### What Didn’t Work
 
 - **Single-request RPCs** were far too slow.
+- Concurrent Map did not boost the performance as expected since the operations are executed in separate goroutines as the locks are held for a very short amount of time.
 
 ### Future Directions
 
 - Integrate **gRPC** or **raw TCP** for lower RPC latency.
 - Implement a **sharded** or **lock-free map** to reduce write-side contention and improve scalability.
-- Explore **advanced networking** options like **RDMA** to bypass kernel networking stacks for ultra-low latency.
+- Substitute the default `gob` encoding with a **custom encoding** for a fixed workload.
 
 ### Team Contributions
 
