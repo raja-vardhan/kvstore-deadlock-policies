@@ -98,16 +98,42 @@ Since there were a lot of configurable parameters like `batchSize, batchTimeout,
 ## Reproducibility
 
 ### Hardware Setup
-*(Specify machine specs — CPU cores, memory, NIC speed, number of nodes, etc.)*
+We require between 4-8 m510 machines with 16-core Intel Xeon D-1548 processors clocked at 2.00GHz and 64GB of DDR4 memory clocked at 2400MT/s to reproduce the throughput results.
 
 ### Software Dependencies
-- Go (version)  
-- Other libraries (if any)  
-- OS environment  
+- Install the Ubuntu 24.04 OS image on all the machines.
+- Install go v1.25.0.
+- Install and set up NFS storage and mount it at `/mnt/nfs`.
+- Create a public-private key-pair and share the public key across all the machines.
+- Set up ssh using the public key created in the previous step and enable key forwarding for password-less authentication.
+- Optionally, also set a hostname alias of the form `node<id>` in the `~/.ssh/config` files for each machine provisioned.
 
 ### Build Instructions
+Follow the steps below to clone the repo and build and run the code.
 ```bash
+# Move to the path where the NFS storage has been mounted
+cd /mnt/nfs
 git clone <repo>
-cd kvs/client
-go build -o client main.go
+cd <repo>
+./run-cluster.sh
+```
+Runs the cluster with default params.
 
+To pass additional server and client configs and set the number of servers and clients, use
+```bash
+./run-cluster.sh SERVER_COUNT CLIENT_COUNT SERVER_CONFIG CLIENT_CONFIG
+```
+
+
+### Configuration Parameters
+
+ - `batchSize` : Number of ops per batch before flush _(default = 8192)_
+ - `batchTimeout` : Max time to wait before flushing a batch (in ms) _(default = 10ms)_
+ - `brokersPerHost` :  Number of brokers per server _(default = 8)_
+ - `generators` : Number of workload generator goroutines per client _(default = 8)_
+ - `channelBuffer` : Size of the buffer for queuing ops by the broker _(default = 65536)_
+
+The timeout is in milliseconds. Pass the client configuration params in the following manner
+```bash
+./run-cluster.sh 4 4 "" "--batchSize=16384 batchTimeout=5 --brokersPerHost=4"
+```
