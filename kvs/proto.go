@@ -3,17 +3,33 @@ package kvs
 type PutRequest struct {
 	Key   string
 	Value string
+	TxID  TXID
 }
 
 type PutResponse struct {
+	Status TxStatus
+}
+
+type TxStatus int
+
+const (
+	TxOK TxStatus = iota
+	TxAborted
+)
+
+type TXID struct {
+	Hi uint64
+	Lo uint64
 }
 
 type GetRequest struct {
-	Key string
+	Key  string
+	TxID TXID // Added this field to identify the transaction
 }
 
 type GetResponse struct {
-	Value string
+	Value  string
+	Status TxStatus
 }
 
 type ReqObj struct {
