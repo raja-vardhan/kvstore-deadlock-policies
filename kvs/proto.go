@@ -1,12 +1,13 @@
 package kvs
 
 type PutRequest struct {
+	TxID  TXID
 	Key   string
 	Value string
-	TxID  TXID
 }
 
 type PutResponse struct {
+	TxID   TXID
 	Status TxStatus
 }
 
@@ -23,30 +24,30 @@ type TXID struct {
 }
 
 type GetRequest struct {
+	TxID TXID
 	Key  string
-	TxID TXID // Added this field to identify the transaction
 }
 
 type GetResponse struct {
+	TxID   TXID
 	Value  string
 	Status TxStatus
 }
 
-type ReqObj struct {
-	Key   string // Key for the operation.
-	Value string // Value for the operation
-	IsGet bool   // True if this is a Get operation, false for Put.
+type CommitRequest struct {
+	Flag bool
+	TxID TXID
 }
 
-type RespObj struct {
-	Value string // Value for the operation
-	IsGet bool   // True if this is a Get operation, false for Put.
+type CommitResponse struct {
+	TxID TXID
 }
 
-type BatchRequest struct {
-	Batch []ReqObj
+type AbortRequest struct {
+	Flag bool
+	TxID TXID
 }
 
-type BatchResponse struct {
-	Batch []RespObj
+type AbortResponse struct {
+	TxID TXID
 }

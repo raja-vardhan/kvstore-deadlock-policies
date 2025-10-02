@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"log"
 	"net/rpc"
+	"os"
+	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -14,13 +15,11 @@ import (
 )
 
 type Client struct {
-	rpcClient *rpc.Client
-
-	clientID     uint64                 // globally unique per client
-	txID         *TxID                  // current transaction ID
-	txActive     bool                   // is a transaction ongoing?
-	writeSet     map[string]string      // key → value
-	participants map[string]*rpc.Client // server address → rpcClient
+	rpcClients   []*rpc.Client // RPC clients to all the servers
+	clientID     uint64        // globally unique per client
+	txID         *TxID         // current transaction ID
+	txActive     bool          // is a transaction ongoing?
+	participants map[int]bool  // idx -> rpcClient
 }
 
 type TxID struct{ Hi, Lo uint64 } // include clientID for uniqueness
@@ -32,45 +31,51 @@ func newTxID(clientID uint64) *TxID {
 	}
 }
 
-func Dial(addr string, clientID uint64) *Client {
+func Dial(addr string) *rpc.Client {
 	rpcClient, err := rpc.DialHTTP("tcp", addr)
 	if err != nil {
 		log.Fatal(err)
 	}
-	return &Client{rpcClient: rpcClient, clientID: clientID}
+	return rpcClient
 }
 
-// func Dial(addr string) *Client {
-// 	rpcClient, err := rpc.DialHTTP("tcp", addr)
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
+var serverAddrs []string
 
-// 	return &Client{rpcClient: rpcClient}
-// }
+// Helper to pick server address for key
+func getServerIdx(key string) int {
+	// This must match the modulo rule you're using
+	k := hashKey(key)
+	serverIdx := k % len(serverAddrs)
+	return serverIdx
+}
+
+func hashKey(key string) int {
+	// Simple hash, you can replace with better one if needed
+	// h := 0
+	// for i := 0; i < len(key); i++ {
+	// 	h = int(key[i]) + 31*h
+	// }
+	// return h & 0x7fffffff
+	h, _ := strconv.Atoi(key)
+	return h
+}
 
 func (c *Client) Begin() {
 	c.txID = newTxID(c.clientID)
 	c.txActive = true
-	c.writeSet = make(map[string]string)
-	c.participants = make(map[string]*rpc.Client)
+	c.participants = make(map[int]bool, len(c.rpcClients))
+	fmt.Println("BEGIN", c.clientID, c.txID)
 }
 
 func (c *Client) Get(key string) (string, error) {
 	if !c.txActive {
 		return "", fmt.Errorf("transaction not active")
 	}
-	if val, ok := c.writeSet[key]; ok {
-		return val, nil // read-your-own-write
-	}
+	fmt.Println("GET", c.clientID, c.txID, key)
 
-	serverAddr := pickServerAddr(key)
-	if _, ok := c.participants[serverAddr]; !ok {
-		rpcClient, err := rpc.DialHTTP("tcp", serverAddr)
-		if err != nil {
-			return "", err
-		}
-		c.participants[serverAddr] = rpcClient
+	serverIdx := getServerIdx(key)
+	if _, ok := c.participants[serverIdx]; !ok {
+		c.participants[serverIdx] = true
 	}
 
 	args := &kvs.GetRequest{
@@ -78,12 +83,11 @@ func (c *Client) Get(key string) (string, error) {
 		TxID: kvs.TXID{Hi: c.txID.Hi, Lo: c.txID.Lo},
 	}
 	reply := &kvs.GetResponse{}
-	err := c.participants[serverAddr].Call("KVService.Get", args, reply)
+	err := c.rpcClients[serverIdx].Call("KVService.Get", args, reply)
 	if err != nil {
 		return "", err
 	}
 	if reply.Status == kvs.TxAborted {
-		c.txActive = false
 		return "", fmt.Errorf("transaction aborted")
 	}
 	return reply.Value, nil
@@ -93,15 +97,11 @@ func (c *Client) Put(key, val string) error {
 	if !c.txActive {
 		return fmt.Errorf("transaction not active")
 	}
-	c.writeSet[key] = val
+	fmt.Println("PUT", c.clientID, c.txID, key, val)
 
-	serverAddr := pickServerAddr(key)
-	if _, ok := c.participants[serverAddr]; !ok {
-		rpcClient, err := rpc.DialHTTP("tcp", serverAddr)
-		if err != nil {
-			return err
-		}
-		c.participants[serverAddr] = rpcClient
+	serverIdx := getServerIdx(key)
+	if _, ok := c.participants[serverIdx]; !ok {
+		c.participants[serverIdx] = true
 	}
 
 	args := &kvs.PutRequest{
@@ -110,234 +110,208 @@ func (c *Client) Put(key, val string) error {
 		TxID:  kvs.TXID{Hi: c.txID.Hi, Lo: c.txID.Lo},
 	}
 	reply := &kvs.PutResponse{}
-	err := c.participants[serverAddr].Call("KVService.Put", args, reply)
+	err := c.rpcClients[serverIdx].Call("KVService.Put", args, reply)
 	if err != nil {
 		return err
 	}
 	if reply.Status == kvs.TxAborted {
-		c.txActive = false
 		return fmt.Errorf("transaction aborted")
 	}
 	return nil
 }
 
 func (c *Client) Commit() error {
-	return fmt.Errorf("Commit not implemented")
+	if !c.txActive {
+		return fmt.Errorf("transaction not active")
+	}
+	fmt.Println("COMMIT", c.clientID, c.txID)
+
+	args := &kvs.CommitRequest{TxID: kvs.TXID(*c.txID)}
+	reply := &kvs.CommitResponse{}
+	count := 0
+	for idx, _ := range c.participants {
+		if count == 0 {
+			args.Flag = true
+			count++
+		}
+		err := c.rpcClients[idx].Call("KVService.Commit", args, reply)
+		if err != nil {
+			return err
+		}
+	}
+	c.txActive = false
+	c.txID = nil
+	c.participants = nil
+	return nil
 }
 
 func (c *Client) Abort() error {
-	return fmt.Errorf("Abort not implemented")
-}
-
-var serverAddrs []string
-
-// Helper to pick server address for key
-func pickServerAddr(key string) string {
-	// This must match the modulo rule you're using
-	k := hashKey(key)
-	serverIdx := k % len(serverAddrs)
-	return serverAddrs[serverIdx]
-}
-
-func hashKey(key string) int {
-	// Simple hash, you can replace with better one if needed
-	h := 0
-	for i := 0; i < len(key); i++ {
-		h = int(key[i]) + 31*h
+	if !c.txActive {
+		return fmt.Errorf("transaction not active")
 	}
-	return h & 0x7fffffff
-}
+	fmt.Println("ABORT", c.clientID, c.txID)
 
-// func (c *Client) Begin()
-// func (c *Client) Get(key string) (string, error)   // returns value or ErrTxAborted
-// func (c *Client) Put(key, val string) error        // ErrTxAborted if No-Wait conflict
-// func (c *Client) Commit() error                    // returns nil on success, ErrTxAborted otherwise
-// func (c *Client) Abort() error
-
-// ---------------- Broker ----------------
-
-type BrokerConfig struct {
-	BatchSize    int
-	BatchTimeout time.Duration
-	Value        string
-}
-
-type Broker struct {
-	cfg       BrokerConfig
-	client    *Client
-	in        <-chan kvs.WorkloadOp
-	wg        *sync.WaitGroup
-	opsSent   *atomic.Uint64
-	rpcErrors *atomic.Uint64
-}
-
-func (b *Broker) run(done *atomic.Bool) {
-	defer b.wg.Done()
-
-	batch := make([]kvs.ReqObj, b.cfg.BatchSize)
+	args := &kvs.AbortRequest{TxID: kvs.TXID(*c.txID)}
+	reply := &kvs.AbortResponse{}
 	count := 0
-
-	// one reusable timer per broker
-	timer := time.NewTimer(time.Hour)
-	timer.Stop()
-	timerActive := false
-
-	resetTimer := func() {
-		if timerActive {
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-		}
-		timer.Reset(b.cfg.BatchTimeout)
-		timerActive = true
-	}
-	stopTimer := func() {
-		if timerActive {
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			timerActive = false
-		}
-	}
-	flush := func() {
+	for idx, _ := range c.participants {
 		if count == 0 {
-			return
-		}
-		req := kvs.BatchRequest{Batch: append([]kvs.ReqObj(nil), batch[:count]...)}
-		resp := kvs.BatchResponse{}
-		if err := b.client.rpcClient.Call("KVService.Batch", &req, &resp); err != nil {
-			b.rpcErrors.Add(1)
-		}
-		b.opsSent.Add(uint64(count))
-		count = 0
-		stopTimer()
-	}
-
-	for !done.Load() {
-		select {
-		case op, ok := <-b.in:
-			if !ok {
-				flush()
-				return
-			}
-			if op.IsRead {
-				batch[count] = kvs.ReqObj{Key: fmt.Sprintf("%d", op.Key), IsGet: true}
-			} else {
-				batch[count] = kvs.ReqObj{Key: fmt.Sprintf("%d", op.Key), Value: b.cfg.Value, IsGet: false}
-			}
+			args.Flag = true
 			count++
-			if count == 1 {
-				resetTimer()
-			}
-			if count == b.cfg.BatchSize {
-				flush()
-			}
-
-		case <-timer.C:
-			timerActive = false
-			flush()
+		}
+		err := c.rpcClients[idx].Call("KVService.Abort", args, reply)
+		if err != nil {
+			return err
 		}
 	}
-	flush()
+	return nil
 }
 
-//----------------runClient-----------
+//----------------workloads-----------
 
-func runClient(id int, hosts HostList, done *atomic.Bool, workload string, theta float64, batchSize int, batchTimeout int, brokersPerHost int, channelBuffer int,
-	generators int, resultsCh chan<- uint64) {
-
-	clients := make([]*Client, len(hosts))
-	for i := 0; i < len(hosts); i++ {
-		clients[i] = Dial(hosts[i], uint64(id))
+func runClient(id int, hosts HostList, done *atomic.Bool, workload string, theta float64, opsPerTx int) {
+	rpcClients := make([]*rpc.Client, len(hosts))
+	for i, host := range hosts {
+		rpcClients[i] = Dial(host)
 	}
-
+	client := Client{rpcClients: rpcClients, clientID: uint64(id)}
+	wl := kvs.NewWorkload(workload, theta)
 	value := strings.Repeat("x", 128)
-
-	var wg sync.WaitGroup
-	var opsSent atomic.Uint64
-	var rpcErrors atomic.Uint64
-
-	// per-host broker channels
-	mq := make([][]chan kvs.WorkloadOp, len(hosts))
-	brokerCounters := make([]uint64, len(hosts)) // round-robin counters
-
-	for i := range hosts {
-		mq[i] = make([]chan kvs.WorkloadOp, brokersPerHost)
-		for b := 0; b < brokersPerHost; b++ {
-			ch := make(chan kvs.WorkloadOp, channelBuffer)
-			mq[i][b] = ch
-			wg.Add(1)
-			broker := &Broker{
-				cfg: BrokerConfig{
-					BatchSize:    batchSize,
-					BatchTimeout: time.Duration(batchTimeout) * time.Millisecond,
-					Value:        value,
-				},
-				client:    clients[i],
-				in:        ch,
-				wg:        &wg,
-				opsSent:   &opsSent,
-				rpcErrors: &rpcErrors,
+	txOps := make([]kvs.WorkloadOp, opsPerTx)
+	for !done.Load() {
+		abort := false
+		if !client.txActive { // If true retry the previous transaction
+			client.Begin()
+			txOps = txOps[:0] // Empty the transaction list as we do not need to repeat the transaction
+			for i := range opsPerTx {
+				txOps[i] = wl.Next()
+				if !txOps[i].IsRead {
+				}
 			}
-			go broker.run(done)
+		}
+		for _, op := range txOps {
+			key := fmt.Sprintf("%d", op.Key)
+			var val string
+			var err error
+			if op.IsRead {
+				val, err = client.Get(key)
+			} else {
+				err = client.Put(key, value)
+			}
+			if err != nil {
+				abort = true
+				break
+			}
+		}
+		if abort {
+			client.Abort()
+		} else {
+			client.Commit()
 		}
 	}
+}
 
-	opsCompleted := uint64(0)
-
-	var genWG sync.WaitGroup
-
-	// produce ops until done
-
-	for g := 0; g < generators; g++ {
-		genWG.Add(1)
-		go func(genID int) {
-			defer genWG.Done()
-			wl := kvs.NewWorkload(workload, theta) // new workload generator
-			for !done.Load() {
-				op := wl.Next()
-				hostIdx := int(op.Key) % len(hosts)
-
-				sent := false
-				start := int(atomic.AddUint64(&brokerCounters[hostIdx], 1))
-				brokers := mq[hostIdx]
-				L := len(brokers)
-
-				// try each broker once, non-blocking
-				for t := 0; t < L; t++ {
-					b := (start + t) % L
-					select {
-					case brokers[b] <- op:
-						sent = true
-					default:
-					}
-					if sent {
+func serializabilityTest(id int, hosts HostList, done *atomic.Bool, numClients int, initDone *atomic.Bool) {
+	rpcClients := make([]*rpc.Client, len(hosts))
+	for i, host := range hosts {
+		rpcClients[i] = Dial(host)
+	}
+	client := Client{rpcClients: rpcClients, clientID: uint64(id)}
+	checkBal := 0
+	initAmt := 1000
+	txnAmt := 100
+	total := initAmt * numClients
+	balances := make([]int, numClients)
+	for !done.Load() {
+		abort := false
+		if !initDone.Load() {
+			if id != 0 {
+				continue
+			}
+			if !client.txActive {
+				client.Begin()
+			}
+			for i := 0; i < numClients; i++ {
+				acctId := fmt.Sprintf("%d", i)
+				amt := fmt.Sprintf("%d", initAmt)
+				err := client.Put(acctId, amt)
+				if err != nil {
+					abort = true
+					break
+				}
+			}
+			if abort {
+				client.Abort()
+			} else {
+				client.Commit()
+				initDone.Store(true)
+				checkBal = (checkBal + 1) % 2 // Every 2nd txn is check balance
+			}
+		} else {
+			if checkBal == 1 {
+				if !client.txActive {
+					client.Begin()
+				}
+				sum := 0
+				balances = balances[:0]
+				for i := 0; i < numClients; i++ {
+					acctId := fmt.Sprintf("%d", i)
+					bal, err := client.Get(acctId)
+					if err != nil {
+						abort = true
 						break
 					}
+					balances[i], _ = strconv.Atoi(bal)
+					sum += balances[i]
 				}
+				if abort {
+					client.Abort()
+				} else {
+					client.Commit()
+					checkBal = (checkBal + 1) % 2 // Every 2nd txn is check balance
+					if sum != total {
+						fmt.Println("VIOLATION!!!")
+					}
+					fmt.Println("Sum:", sum, balances)
+				}
+			} else {
+				if !client.txActive {
+					client.Begin()
+				}
+				src := fmt.Sprintf("%d", id)
+				dst := fmt.Sprintf("%d", (id+1)%numClients)
+				srcBal, err := client.Get(src)
+				if err != nil {
+					client.Abort()
+					continue
+				}
+				sBal, _ := strconv.Atoi(srcBal)
+				if sBal < txnAmt {
+					client.Abort()
+					continue
+				}
+				dstBal, err := client.Get(dst)
+				if err != nil {
+					client.Abort()
+					continue
+				}
+				dBal, _ := strconv.Atoi(dstBal)
+				srcBal = fmt.Sprintf("%d", sBal-txnAmt)
+				dstBal = fmt.Sprintf("%d", dBal+txnAmt)
+				err = client.Put(dst, dstBal)
+				if err != nil {
+					client.Abort()
+					continue
+				}
+				err = client.Put(src, srcBal)
+				if err != nil {
+					client.Abort()
+					continue
+				}
+				client.Commit()
 			}
-		}(g)
-	}
-
-	// wait for generators to finish
-	genWG.Wait()
-
-	// close channels → brokers flush & exit
-	for i := range mq {
-		for _, ch := range mq[i] {
-			close(ch)
 		}
 	}
-	wg.Wait()
-
-	fmt.Printf("Client %d finished ops=%d rpcErrors=%d\n", id, opsCompleted, rpcErrors.Load())
-	resultsCh <- opsCompleted
 }
 
 type HostList []string
@@ -356,13 +330,14 @@ func main() {
 
 	flag.Var(&hosts, "hosts", "Comma-separated list of host:ports to connect to")
 	theta := flag.Float64("theta", 0.99, "Zipfian distribution skew parameter")
-	workload := flag.String("workload", "YCSB-B", "Workload type (YCSB-A, YCSB-B, YCSB-C)")
+	workload := flag.String("workload", "YCSB-B", "Workload type (YCSB-A, YCSB-B, YCSB-C, xfer)")
 	secs := flag.Int("secs", 30, "Duration in seconds for each client to run")
-	batchSize := flag.Int("batchSize", 8192, "Number of ops per batch before flush")
-	batchTimeout := flag.Int("batchTimeout", 10, "Max time to wait before flushing a batch (in ms)")
-	brokersPerHost := flag.Int("brokersPerHost", 8, "Number of brokers per server")
-	generators := flag.Int("generators", 8, "Number of workload generator goroutines per client")
-	channelBuffer := flag.Int("channelBuffer", 65536, "Size of the buffer for queuing ops by the broker")
+	opsPerTx := flag.Int("opsPerTx", 3, "Number of Get or Put operations per transaction")
+	// batchSize := flag.Int("batchSize", 8192, "Number of ops per batch before flush")
+	// batchTimeout := flag.Int("batchTimeout", 10, "Max time to wait before flushing a batch (in ms)")
+	// brokersPerHost := flag.Int("brokersPerHost", 8, "Number of brokers per server")
+	// generators := flag.Int("generators", 8, "Number of workload generator goroutines per client")
+	// channelBuffer := flag.Int("channelBuffer", 65536, "Size of the buffer for queuing ops by the broker")
 	flag.Parse()
 
 	serverAddrs = hosts // so pickServerAddr can use it
@@ -379,23 +354,23 @@ func main() {
 		hosts, *theta, *workload, *secs,
 	)
 
-	start := time.Now()
-
 	done := atomic.Bool{}
-	resultsCh := make(chan uint64)
 
-	clientId := 0
-	go func(clientId int) {
-		runClient(clientId, hosts, &done, *workload, *theta, *batchSize, *batchTimeout, *brokersPerHost, *channelBuffer, *generators, resultsCh)
-	}(clientId)
+	if *workload != "xfer" {
+		clientId := os.Getpid() // TODO: Check if this is unique across different client processes. Original value was 0
+		go func(clientId int) {
+			runClient(clientId, hosts, &done, *workload, *theta, *opsPerTx)
+		}(clientId)
+	} else {
+		numClients := 10
+		initDone := atomic.Bool{}
+		for clientId := 0; clientId < numClients; clientId++ {
+			go func(clientId int) {
+				serializabilityTest(clientId, hosts, &done, numClients, &initDone)
+			}(clientId)
+		}
+	}
 
 	time.Sleep(time.Duration(*secs) * time.Second)
 	done.Store(true)
-
-	opsCompleted := <-resultsCh
-
-	elapsed := time.Since(start)
-
-	opsPerSec := float64(opsCompleted) / elapsed.Seconds()
-	fmt.Printf("throughput %.2f ops/s\n", opsPerSec)
 }
