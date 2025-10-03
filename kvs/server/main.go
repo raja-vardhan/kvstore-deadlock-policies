@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -8,85 +9,90 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"net/rpc"
-	"sync/atomic"
+	"sync"
 	"time"
-	"errors"
 
 	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/rstutsman/cs6450-labs/kvs"
 )
 
-LOCK_DENIED := "LOCK_DENIED"
-TXN_NOT_FOUND := "TXN_NOT_FOUND"
+var LOCK_DENIED = "LOCK_DENIED"
+var TXN_NOT_FOUND = "TXN_NOT_FOUND"
 
 type TxRecord struct {
-	id TxID
-	status TxStatus
+	id       kvs.TXID
+	status   kvs.TxStatus
 	writeSet map[string]string   // staged writes
-	readSet map[string]struct{}  // optional
+	readSet  map[string]struct{} // optional
 }
 
 type LockState struct {
-	readers map[TxID]struct{}    // S holders
-	writer TxID                 // X holder
+	readers map[kvs.TXID]struct{} // S holders
+	writer  kvs.TXID              // X holder
 }
 
 type Stats struct {
 	commits uint64
-	aborts uint64
+	aborts  uint64
 }
 
 func (s *Stats) Sub(prev *Stats) Stats {
 	r := Stats{}
 	r.commits = s.commits - prev.commits
-	r.commits = s.aborts - prev.aborts
+	r.aborts = s.aborts - prev.aborts
 	return r
 }
 
 type KVService struct {
-	mu	sync.Mutex
+	mu        sync.Mutex
 	mp        cmap.ConcurrentMap[string, string]
-	locks	map[string]*LockState
-	txTable	map[TxID]*TxRecord
+	locks     map[string]*LockState
+	txTable   map[kvs.TXID]*TxRecord
 	stats     Stats
 	prevStats Stats
 	lastPrint time.Time
 }
 
 func NewKVService() *KVService {
-	kvs := &KVService{}
-	kvs.mp = cmap.New[string]()
-	kvs.locks = make(map[string]*LockState)
-	kvs.txTable = make(map[TxID]*TxRecord)
-	kvs.lastPrint = time.Now()
-	return kvs
+	kvService := &KVService{}
+	kvService.mp = cmap.New[string]()
+	kvService.locks = make(map[string]*LockState)
+	kvService.txTable = make(map[kvs.TXID]*TxRecord)
+	kvService.lastPrint = time.Now()
+	return kvService
 }
 
-func (kv *KVService) begin(txID TxID) error {
-	txRecord := &TxRecord {
-			id: request.txID, 
-			status: Active,
-			writeSet: make(map[string]string),
-			readSet: make(map[string]struct{})
-		}
-	
+func (kv *KVService) begin(txID kvs.TXID) error {
+	txRecord := &TxRecord{
+		id:       txID,
+		status:   kvs.TxOK,
+		writeSet: make(map[string]string),
+		readSet:  make(map[string]struct{}),
+	}
+
 	kv.txTable[txID] = txRecord
+
+	// fmt.Println(txRecord)
 
 	return nil
 }
 
-func (kv *KVService) TxnGet(request *kvs.GetRequest, response *kvs.GetResponse) error {
+func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) error {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
+
+	// fmt.Println(request)
 
 	// Check if the transaction record exists
 	txRecord, ok := kv.txTable[request.TxID]
 	if !ok {
-		begin(request.TxID)
+		kv.begin(request.TxID)
 	}
 
 	// Check if the transaction has already written to this key (already holds the X-lock)
-	if val, ok := txRecord.writeSet[request.Key] ; ok {
+	txRecord = kv.txTable[request.TxID]
+	// fmt.Println(txRecord.writeSet)
+	if val, ok := txRecord.writeSet[request.Key]; ok {
 		response.Value = val
 		return nil
 	}
@@ -95,13 +101,13 @@ func (kv *KVService) TxnGet(request *kvs.GetRequest, response *kvs.GetResponse) 
 	lockState, ok := kv.locks[request.Key]
 	if !ok {
 		lockState = &LockState{
-			readers: make(map[TxID]struct{})
+			readers: make(map[kvs.TXID]struct{}),
 		}
 		kv.locks[request.Key] = lockState
 	}
 
 	// Try to acquire S-lock. Deny only if another transaction holds it
-	if lockState.writer != TxID{} && lockState.writer != request.TxID {
+	if lockState.writer != (kvs.TXID{}) && lockState.writer != request.TxID {
 		return errors.New(LOCK_DENIED)
 	}
 
@@ -110,7 +116,7 @@ func (kv *KVService) TxnGet(request *kvs.GetRequest, response *kvs.GetResponse) 
 	txRecord.readSet[request.Key] = struct{}{}
 
 	// Get value from map
-	if val, ok := kv.mp.Get(request.Key) ; ok {
+	if val, ok := kv.mp.Get(request.Key); ok {
 		response.Value = val
 	} else {
 		response.Value = ""
@@ -118,18 +124,21 @@ func (kv *KVService) TxnGet(request *kvs.GetRequest, response *kvs.GetResponse) 
 	return nil
 }
 
-func (kv *KVService) TxnPut(request *kvs.PutRequest, response *kvs.PutResponse) {
+func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) error {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
+
+	// fmt.Println(request)
 
 	// Check if the transaction record exists
 	txRecord, ok := kv.txTable[request.TxID]
 	if !ok {
-		begin(request.TxID)
+		kv.begin(request.TxID)
 	}
 
 	// Check if the transaction has already written to this key (already holds the X-lock)
-	if val, ok := txRecord.writeSet[request.Key] ; ok {
+	txRecord = kv.txTable[request.TxID]
+	if _, ok := txRecord.writeSet[request.Key]; ok {
 		txRecord.writeSet[request.Key] = request.Value
 		return nil
 	}
@@ -138,19 +147,19 @@ func (kv *KVService) TxnPut(request *kvs.PutRequest, response *kvs.PutResponse) 
 	lockState, ok := kv.locks[request.Key]
 	if !ok {
 		lockState = &LockState{
-			readers: make(map[TxID]struct{})
+			readers: make(map[kvs.TXID]struct{}),
 		}
 		kv.locks[request.Key] = lockState
 	}
-	
+
 	// Try to acquire X-lock. Return LOCK_DENIED if failed
-	if lockState.writer != TxID{} {
+	if lockState.writer != (kvs.TXID{}) {
 		if lockState.writer != request.TxID {
 			return errors.New(LOCK_DENIED)
 		}
 	} else {
-		for item := range kv.mp.IterBuffered() {
-			if (item.Key != request.TxID) {
+		for key, _ := range lockState.readers {
+			if key != request.TxID {
 				return errors.New(LOCK_DENIED)
 			}
 		}
@@ -163,9 +172,11 @@ func (kv *KVService) TxnPut(request *kvs.PutRequest, response *kvs.PutResponse) 
 
 }
 
-func (kv *KVService) Commit(request *kvs.CommitRequest, response *kvs.CommitResponse) {
+func (kv *KVService) Commit(request *kvs.CommitRequest, response *kvs.CommitResponse) error {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
+
+	// fmt.Println("Commit ", request)
 
 	// Check if the transaction record exists
 	txRecord, ok := kv.txTable[request.TxID]
@@ -175,30 +186,32 @@ func (kv *KVService) Commit(request *kvs.CommitRequest, response *kvs.CommitResp
 
 	// Do writes
 	for key, val := range txRecord.writeSet {
-		kv.mp.Set(k, v)
+		kv.mp.Set(key, val)
 	}
 
 	// Remove TxID from LockState
-	for key, val := txRecord.writeSet {
-		kv.locks[key].writer = TxID{}
+	for key, _ := range txRecord.writeSet {
+		kv.locks[key].writer = kvs.TXID{}
 	}
-	for key := txRecord.readSet {
+	for key := range txRecord.readSet {
 		delete(kv.locks[key].readers, request.TxID)
 	}
 
 	// Remove txID from record
 	delete(kv.txTable, request.TxID)
 
-	if request.flag {
+	if request.Flag {
 		kv.stats.commits++
 	}
 
 	return nil
 }
 
-func (kv *KVService) Abort(request *kvs.AbortRequest, response *kvs.AbortResponse) {
+func (kv *KVService) Abort(request *kvs.AbortRequest, response *kvs.AbortResponse) error {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
+
+	// fmt.Println("Abort ", request)
 
 	// Check if the transaction record exists
 	txRecord, ok := kv.txTable[request.TxID]
@@ -207,17 +220,17 @@ func (kv *KVService) Abort(request *kvs.AbortRequest, response *kvs.AbortRespons
 	}
 
 	// Remove TxID from LockState
-	for key, val := txRecord.writeSet {
-		kv.locks[key].writer = TxID{}
+	for key, _ := range txRecord.writeSet {
+		kv.locks[key].writer = kvs.TXID{}
 	}
-	for key := txRecord.readSet {
+	for key := range txRecord.readSet {
 		delete(kv.locks[key].readers, request.TxID)
 	}
 
 	// Remove txID from record
 	delete(kv.txTable, request.TxID)
 
-	if request.flag {
+	if request.Flag {
 		kv.stats.aborts++
 	}
 
@@ -225,11 +238,14 @@ func (kv *KVService) Abort(request *kvs.AbortRequest, response *kvs.AbortRespons
 }
 
 func (kv *KVService) printStats() {
-
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
 	stats := Stats{
-		gets: atomic.LoadUint64(&kv.stats.gets),
-		puts: atomic.LoadUint64(&kv.stats.puts),
+		commits: kv.stats.commits,
+		aborts:  kv.stats.aborts,
 	}
+
+	fmt.Println("Commits: %d Aborts: %d", kv.stats.commits, kv.stats.aborts)
 
 	prevStats := kv.prevStats
 	kv.prevStats = stats
@@ -240,10 +256,11 @@ func (kv *KVService) printStats() {
 	diff := stats.Sub(&prevStats)
 	deltaS := now.Sub(lastPrint).Seconds()
 
-	fmt.Printf("get/s %0.2f\nput/s %0.2f\nops/s %0.2f\n\n",
-		float64(diff.gets)/deltaS,
-		float64(diff.puts)/deltaS,
-		float64(diff.gets+diff.puts)/deltaS)
+	fmt.Println("diff %v deltaS %f", diff, deltaS)
+	fmt.Printf("commits/s %0.2f\naborts/s %0.2f\nops/s %0.2f\n\n",
+		float64(diff.commits)/deltaS,
+		float64(diff.aborts)/deltaS,
+		float64(diff.commits+diff.aborts)/deltaS)
 }
 
 func main() {

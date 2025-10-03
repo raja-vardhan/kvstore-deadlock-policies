@@ -64,14 +64,12 @@ func (c *Client) Begin() {
 	c.txID = newTxID(c.clientID)
 	c.txActive = true
 	c.participants = make(map[int]bool, len(c.rpcClients))
-	fmt.Println("BEGIN", c.clientID, c.txID)
 }
 
 func (c *Client) Get(key string) (string, error) {
 	if !c.txActive {
 		return "", fmt.Errorf("transaction not active")
 	}
-	fmt.Println("GET", c.clientID, c.txID, key)
 
 	serverIdx := getServerIdx(key)
 	if _, ok := c.participants[serverIdx]; !ok {
@@ -97,7 +95,6 @@ func (c *Client) Put(key, val string) error {
 	if !c.txActive {
 		return fmt.Errorf("transaction not active")
 	}
-	fmt.Println("PUT", c.clientID, c.txID, key, val)
 
 	serverIdx := getServerIdx(key)
 	if _, ok := c.participants[serverIdx]; !ok {
@@ -124,7 +121,6 @@ func (c *Client) Commit() error {
 	if !c.txActive {
 		return fmt.Errorf("transaction not active")
 	}
-	fmt.Println("COMMIT", c.clientID, c.txID)
 
 	args := &kvs.CommitRequest{TxID: kvs.TXID(*c.txID)}
 	reply := &kvs.CommitResponse{}
@@ -149,7 +145,6 @@ func (c *Client) Abort() error {
 	if !c.txActive {
 		return fmt.Errorf("transaction not active")
 	}
-	fmt.Println("ABORT", c.clientID, c.txID)
 
 	args := &kvs.AbortRequest{TxID: kvs.TXID(*c.txID)}
 	reply := &kvs.AbortResponse{}
@@ -184,21 +179,20 @@ func runClient(id int, hosts HostList, done *atomic.Bool, workload string, theta
 			client.Begin()
 			txOps = txOps[:0] // Empty the transaction list as we do not need to repeat the transaction
 			for i := range opsPerTx {
-				txOps[i] = wl.Next()
-				if !txOps[i].IsRead {
-				}
+				txOps = append(txOps, wl.Next())
+				_ = i
 			}
 		}
 		for _, op := range txOps {
 			key := fmt.Sprintf("%d", op.Key)
-			var val string
 			var err error
 			if op.IsRead {
-				val, err = client.Get(key)
+				_, err = client.Get(key)
 			} else {
 				err = client.Put(key, value)
 			}
 			if err != nil {
+				fmt.Println(err)
 				abort = true
 				break
 			}
@@ -222,6 +216,7 @@ func serializabilityTest(id int, hosts HostList, done *atomic.Bool, numClients i
 	txnAmt := 100
 	total := initAmt * numClients
 	balances := make([]int, numClients)
+	freq := 10
 	for !done.Load() {
 		abort := false
 		if !initDone.Load() {
@@ -245,7 +240,7 @@ func serializabilityTest(id int, hosts HostList, done *atomic.Bool, numClients i
 			} else {
 				client.Commit()
 				initDone.Store(true)
-				checkBal = (checkBal + 1) % 2 // Every 2nd txn is check balance
+				checkBal = (checkBal + 1) % freq
 			}
 		} else {
 			if checkBal == 1 {
@@ -261,14 +256,15 @@ func serializabilityTest(id int, hosts HostList, done *atomic.Bool, numClients i
 						abort = true
 						break
 					}
-					balances[i], _ = strconv.Atoi(bal)
-					sum += balances[i]
+					currBal, _ := strconv.Atoi(bal)
+					balances = append(balances, currBal)
+					sum += currBal
 				}
 				if abort {
 					client.Abort()
 				} else {
 					client.Commit()
-					checkBal = (checkBal + 1) % 2 // Every 2nd txn is check balance
+					checkBal = (checkBal + 1) % freq
 					if sum != total {
 						fmt.Println("VIOLATION!!!")
 					}
@@ -309,6 +305,7 @@ func serializabilityTest(id int, hosts HostList, done *atomic.Bool, numClients i
 					continue
 				}
 				client.Commit()
+				checkBal = (checkBal + 1) % freq
 			}
 		}
 	}
