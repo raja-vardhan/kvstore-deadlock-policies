@@ -5,20 +5,24 @@
 ### Throughput Numbers
 In our implementation, we achieved a throughput of over 1800 commits/s across a range of theta values for the YCSB-B workload. The aborts/s remained 0 except for theta values over 0.90. Although aborts were seen even for lower theta values, the total aborts were too few to show up in the median aborts/s statistic. We have provided plots for both the values over the range of theta.
 
-<Insert 2 imgs>
+<img width="1423" height="1007" alt="commits-theta" src="https://github.com/user-attachments/assets/ccea9e5f-949e-4665-8109-65d3dcee5177" />
+
+<img width="1357" height="1006" alt="aborts-theta" src="https://github.com/user-attachments/assets/3444cb10-bc3c-4a8e-bab2-e032ab219727" />
 
 Our system was tested using the provided workload generator, maintaining full workload integrity and serializability under normal operation.
 
 ### Scaling Characteristics
 For the YCSB-B workload with a theta value of 0.99, as we increase the number of clients and servers, the overall commits/s and aborts/s values increase linearly. We have provided the plots for the same below. For the 1st entry however, we tested with 2 clients and 1 server, as running just 1 client does not result in any contention as all transactions are executed in order.
 
-<Insert 2 imgs>
+<img width="1425" height="1220" alt="commits-scaling" src="https://github.com/user-attachments/assets/578f964d-b68a-4cc2-9fa9-2e5dc92bc811" />
+
+<img width="1378" height="1220" alt="aborts-scaling" src="https://github.com/user-attachments/assets/d89cb3b5-8664-4010-b65f-9db84eb517ef" />
 
 ### Bank Transfer Workload
 
 For the bank transfer workload, we perform a balance check on all the accounts after every 10 transactions. Correctness was verified by ensuring that each time the balances were checked, the total amount across all the accounts did not exceed $10000. We observed that towards the end of the workload, the money was generally clustered in a few accounts only. We have also provided the scaling results for this workload, where 10 clients/accounts are run on a single machine as 10 separate goroutines and the KV store is sharded across the rest of the servers. We do not observe any scaling in the throughput as we increase the number of servers.
 
-<Insert 1 img>
+<img width="1396" height="1088" alt="bank-txn-scaling" src="https://github.com/user-attachments/assets/7cce80e3-5a82-47c8-b4d3-ba4095ea42a5" />
 
 In this workload, we see a significant increase in the aborts vs the commits, as compared to the YCSB-B workload. This can be explained by the fact that each bank transfer requires reading and writing to 2 accounts, whereas in the YCSB-B workload, 95% of the operations were read operations which can be handled concurrently without obtaining an exclusive record on a record.
   
