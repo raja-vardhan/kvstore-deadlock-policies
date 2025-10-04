@@ -1,4 +1,4 @@
-# High-Performance Key-Value Store
+# Distributed Transactions
 
 ## Results
 
@@ -63,10 +63,6 @@ Strict serializability is guaranteed because:
 * The sharding and transaction ID generation are basic, this should be extended to hash distribution and monotonic ID generation for other workloads.
 
 
-
-
-
-
 ---
 
 ## Reproducibility
@@ -93,52 +89,49 @@ cd <repo>
 ```
 Runs the cluster with default params.
 
+### Configuration Parameters
 To pass additional server and client configs and set the number of servers and clients, use
 ```bash
 ./run-cluster.sh SERVER_COUNT CLIENT_COUNT SERVER_CONFIG CLIENT_CONFIG
 ```
-
-### Configuration Parameters
-
- - `batchSize` : Number of ops per batch before flush _(default = 8192)_
- - `batchTimeout` : Max time to wait before flushing a batch (in ms) _(default = 10ms)_
- - `brokersPerHost` :  Number of brokers per server _(default = 8)_
- - `generators` : Number of workload generator goroutines per client _(default = 8)_
- - `channelBuffer` : Size of the buffer for queuing ops by the broker _(default = 65536)_
-
-The timeout is in milliseconds. Pass the client configuration params in the following manner
+To pass additional theta values, use
 ```bash
-./run-cluster.sh 4 4 "" "--batchSize=16384 batchTimeout=5 --brokersPerHost=4"
+./run-cluster.sh SERVER_COUNT CLIENT_COUNT "" "-theta 0" #For theta=0
+./run-cluster.sh SERVER_COUNT CLIENT_COUNT "" "-theta 0.99" #For theta=0.99
 ```
-
+To pass additional workload parameter, use
+```bash
+./run-cluster.sh SERVER_COUNT CLIENT_COUNT "" "-workload xfer"
+```
 ---
 
 ## Reflections
 
 ### Lessons Learned
 
-- **Batching** was the most powerful optimization for throughput.
-- **Goroutine management** was very crucial: having too few goroutines, reduced the performance; whereas too many of them, induced contention and GC overhead.
-- **Sync map** was not very helpful in this implementation.
+- Implementing 2PC and 2PL is relatively easy in low-contention scenarios and it ensures linearizibilty and high throughput. 
+- To achieve lock-free reads, we require having multiple versions of the data.
 
 ### Optimizations that worked well
 
-- Batching
-- Brokers and multiple workload generators
+- Lazy initialization of transaction - we have no explicit begin phase and a transaction record is created after 1st get/put operation.
+- We skip the formal prepare phase and locks acquired eagerly with a no wait deadlock approach.
 
 ### What Didn’t Work
 
-- **Single-request RPCs** were far too slow.
-- Concurrent Map did not boost the performance as expected as the locks are held for a very short amount of time.
+- Batching did not work as expected.
+- In Bank transfer workload, when 10 goroutines are executing transfers, we see a lot of aborts because each transaction requires an exclusive lock to perform write.
 
 ### Future Directions
 
-- Integrate **gRPC** or **raw TCP** for lower RPC latency.
-- Implement a **lock-free map** to reduce write-side contention and improve scalability.
-- Substitute the default `gob` encoding with a **custom encoding** for a fixed workload.
+- Implement durability and recovery protocols to handle crashes.
+- Using a waiting lock-table with timeouts or deadlock detection will improve throughput.
+- Implementing a fine-grained locking approach where unrelated keys are not serialized will scale better.
+- Extend the system to have hash distribution and monotonic ID generation.
+- Try backoff and retry with random jitter when a transaction fails.
 
 ### Team Contributions
 
-- **Rajavardhan Reddy Siriganagiri**: Client code & batch strategy  
-- **Siddharth Kapoor**: Server implementation & profiling 
-- **Neha Bhat**: Documentation, tuning, and result analysis
+- **Rajavardhan Reddy Siriganagiri**: Client code, serializability, generator code 
+- **Siddharth Kapoor**: Server concurrency control and commit protocol, result analysis
+- **Neha Bhat**: Transaction skelton, workload integrity, Documentation
