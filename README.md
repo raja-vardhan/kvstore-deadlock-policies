@@ -24,7 +24,7 @@ For the bank transfer workload, we perform a balance check on all the accounts a
 
 <img width="1396" height="1088" alt="bank-txn-scaling" src="https://github.com/user-attachments/assets/7cce80e3-5a82-47c8-b4d3-ba4095ea42a5" />
 
-In this workload, we see a significant increase in the aborts vs the commits, as compared to the YCSB-B workload. This can be explained by the fact that each bank transfer requires reading and writing to 2 accounts, whereas in the YCSB-B workload, 95% of the operations were read operations which can be handled concurrently without obtaining an exclusive record on a record.
+In this workload, we see a significant increase in the aborts vs the commits, as compared to the YCSB-B workload. This can be explained by the fact that each bank transfer requires reading and writing to 2 accounts, whereas in the YCSB-B workload, 95% of the operations were read operations which can be handled concurrently without obtaining an exclusive lock on a record.
   
 ---
 
