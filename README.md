@@ -2,42 +2,25 @@
 
 ## Results
 
-### Final Throughput Numbers
-In our implementation of the High-Performance Key-Value Store, we achieved a peak throughput of **19.43M ops/sec** (19435544 ops/s) using 8 CloudLab `m510` nodes and the YCSB-B workload (95% gets, 5% puts, θ = 0.99). Our system was tested using the provided workload generator, maintaining full workload integrity and linearizability under normal operation.
+### Throughput Numbers
+In our implementation, we achieved a throughput of over 1800 commits/s across a range of theta values for the YCSB-B workload. The aborts/s remained 0 except for theta values over 0.90. Although aborts were seen even for lower theta values, the total aborts were too few to show up in the median aborts/s statistic. We have provided plots for both the values over the range of theta.
 
-### Hardware Utilization
-- **CPU**: ~65% usage per core on server nodes during peak load
-- **Memory**: ~1 GB per node
-- **Network**: Sustained ~9.5 Gbps throughput over 10 Gbps interfaces
+<Insert 2 imgs>
+
+Our system was tested using the provided workload generator, maintaining full workload integrity and serializability under normal operation.
 
 ### Scaling Characteristics
-At 4 nodes(2 client, 2 server) we achieve 7.2M ops/sec. When we scale the cluster to 8 nodes, we achieve 19M ops/sec approx., which is 2.6x times increase in throughput. The performance increases with a bigger cluster. We observed linear scaling when increasing the number of server and client nodes. The system handled increased client load gracefully.
+For the YCSB-B workload with a theta value of 0.99, as we increase the number of clients and servers, the overall commits/s and aborts/s values increase linearly. We have provided the plots for the same below. For the 1st entry however, we tested with 2 clients and 1 server, as running just 1 client does not result in any contention as all transactions are executed in order.
 
-Strong Scaling of Clients - We keep the number of servers fixed and the scale up the number of clients. We observe the following throughput.
-| Servers | Clients | Throughput (ops/sec) |
-|---------|---------|----------------------|
-| 2       | 2       | 7.25M                |
-| 2       | 4       | 13.7M                |
-| 2       | 6       | 14.4M                |
-| 4       | 2       | 10.28M               |
-| 4       | 4       | 19.43M               |
+<Insert 2 imgs>
 
+### Bank Transfer Workload
 
-### Graphs & Visualizations
+For the bank transfer workload, we perform a balance check on all the accounts after every 10 transactions. Correctness was verified by ensuring that each time the balances were checked, the total amount across all the accounts did not exceed $10000. We observed that towards the end of the workload, the money was generally clustered in a few accounts only. We have also provided the scaling results for this workload, where 10 clients/accounts are run on a single machine as 10 separate goroutines and the KV store is sharded across the rest of the servers. We do not observe any scaling in the throughput as we increase the number of servers.
 
-- **Scaling with Cluster Size**
-  <br>
-  ![WhatsApp Image 2025-09-07 at 8 02 44 PM](https://github.com/user-attachments/assets/4ac11870-210e-4188-9399-57e2df6bea41)
+<Insert 1 img>
 
-
-- **Resource Utilization**
-  <br>
-![WhatsApp Image 2025-09-07 at 7 34 45 PM (2)](https://github.com/user-attachments/assets/8d375455-8d04-4ca8-9880-b147c4e53627)
-
-
-- **Final Results**
-  <br>
-![WhatsApp Image 2025-09-07 at 7 34 45 PM](https://github.com/user-attachments/assets/6ad94548-3511-412a-aa3a-a6357d3b96d7)
+In this workload, we see a significant increase in the aborts vs the commits, as compared to the YCSB-B workload. This can be explained by the fact that each bank transfer requires reading and writing to 2 accounts, whereas in the YCSB-B workload, 95% of the operations were read operations which can be handled concurrently without obtaining an exclusive record on a record.
   
 ---
 
