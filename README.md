@@ -115,11 +115,11 @@ To pass additional workload parameter, use
 ### Optimizations that worked well
 
 - Lazy initialization of transaction - we have no explicit begin phase and a transaction record is created after 1st get/put operation.
-- We skip the formal prepare phase and locks acquired eagerly with a no wait deadlock approach.
+- We skip the formal prepare phase and locks are acquired eagerly with a no wait deadlock approach.
 
 ### What Didn’t Work
 
-- Batching did not work as expected.
+- Its harder to implement 2PC+2PL with Batching.
 - In Bank transfer workload, when 10 goroutines are executing transfers, we see a lot of aborts because each transaction requires an exclusive lock to perform write.
 
 ### Future Directions
