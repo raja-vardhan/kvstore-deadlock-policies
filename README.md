@@ -45,66 +45,40 @@ Strong Scaling of Clients - We keep the number of servers fixed and the scale up
 
 ### Changes Made, Effects and Rationale
 
-#### Sharding
+#### Transaction design
 
-The original skeleton code sent the requests to a single server. Distribute the key across the available servers using the modulo operator (`key % num_of_servers`) for distributing the load. A key always goes to the same server.
-For a 4 node setup with 2 clients and 2 servers, the performance jumps by 90-100%.
-Equal key distribution does not mean equal load distribution but this works for 2 servers due to the nature of YCSB-B workload (The load distribution is approximately 55% on one server and 45% on the other).
+Each client generates a transaction id `TXID` which consists of (clientID, unixNano) and tracks the set of shard participants touched during the design. Keys are routed to servers via a consistent modulo partitioner; every `Get/Put` carries the TxID, and the client adds the destination server to the participants set.
+The client acts as the coordinator and there is no explicit `Begin` phase. Once a client sends a Get/Put with a transaction ID that hasn't been seen before, a new transaction is initiated. At commit time, the client sends a `Commit` RPC to each participant.
 
-#### Concurrent map
+`proto.go` has been modified to include `Commit` and `Abort` RPCs. These RPCs contain a boolean `Flag` so that a commit is correctly tracked only once by incrementing the `commits/aborts` counters even when multiple shards are involved. This flag is sent to the first server in the transaction's participants list. 
+The `Get` and `Put` methods have been modified to include the transaction id. Lock conflicts are known through an RPC error `LOCK_DENIED`. We use a no-wait protocol to avoid deadlocks so a client immediately issues an `Abort` request on receiving the error.
 
-Since the default map implementation serializes every read/write, we replace it with a popular concurrent map implementation **[[concurrent-map](https://github.com/orcaman/concurrent-map)]**.
-Instead of a single big map with one lock, this map is split into **32 shards**.
+Each server runs a simple lock-manager and a per-transaction record. A `TxRecord` holds a staged `writeSet` and a `readSet`; it’s created lazily on first touch (`Get/Put`). Concurrency control is strict two-phase locking at key granularity: a LockState for each key maintains a set of S-lock holders (`readers`) and a single X-lock holder (`writer`). `Get` first returns the caller’s uncommitted write if present (“read-your-writes”), otherwise it tries to take/keep an S-lock unless another transaction holds the X-lock. `Put` requires (or upgrades to) the X-lock—denying the request if there is another writer or any foreign readers—and stages the write in the transaction’s `writeSet`. On `Commit`, the server atomically installs all staged writes, then releases the X/S locks and drops the transaction record. `Abort` just releases locks and discards staged state.
 
-This reduces lock contention:
-  - Two goroutines modifying keys in different shards → no blocking.
-  - Two goroutines modifying keys in the same shard → they block each other.
+If all the `Get/Put` operations in a transaction succeed, the servers hold the locks required to commit the transaction and the client sends a `Commit` request without the need for a `Prepare` phase.
 
-This ensures that not all writes are serialized.
-This had a negligible effect on performance (< 10%) when each operation is executed in a separate goroutine as the locks are held for a very short amount of time.
+#### Rationale and Strict Serializability
 
-#### Batching
+We aimed for the smallest mechanism that still guarantees serializability and read-your-writes within a transaction. Key-level strict 2PL is easier to reason about. The staged `writeSet` separates what will be committed from the map, so a `Get` can be served from the transaction's private state without extra versioning.
+Conflicts are handled by immediate denial rather than waiting which eliminates deadlock handling logic. The client sends the `Commit/Abort` and handles errors eliminating the need for a coordinator.
 
-We queue requests at the client until we accumulate a specific number of requests (configurable through the `batchSize` flag). This batch is sent to the server for processing.
-Without batching, each request to the server executes in a separate goroutine. This adds huge scheduling overhead on the server side. Also, each request has to make a round trip on the network and adds a TCP/HTTP header.
-Batching amortizes the cost of system calls, network round trips. It also reduces the scheduling overhead on the server.
-Due to the skewed distribution of R/W operations, we also introduce a timeout (configurable through `batchTimeout` flag). Cold keys don't fill up a batch quickly and this adds to their latency. If a batch doesn't get filled after the timeout, it is still flushed to the server.
+Strict serializability is guaranteed because:
+  1. Any schedule produced by strict 2PL is conflict-serializable. Locks ensure that any conflicting operations are ordered consistently and lock release at commit ensures no dirty reads or writes.
+  2. A transaction cannot read uncommitted writes. It either reads from the kv map or its own write set. Once a transaction commits, its effects are permanent and visible.
+  3. All writes become visible atomically at commit time. Consider a transaction T2 which starts after another transaction T1 commits. T1's writes will have already been applied by the time the client receives T1's commit acknowledgement. And T2 starts after T1's commit, therefore when T2 begins reading or writing, it sees the effects of T1. This preserves real-time order ensuring linearizability.
+  4. Each transaction's commit is synchronous across all its participants (the client waits until all `Commit` RPCs succeed). The client considers the transaction to be committed only after all servers respond positively, ensuring global visibility is instantaneous from the client's perspective.
 
-This improved the throughput by **5x**. It also reduced the CPU utilization on the server (less scheduling + system call overhead). 
+#### Trade-offs and alternatives considered
 
-#### Brokers and multiple workload generators
+* There are a few costs for the simplicty. A crash or failure after some shards commit can leave a partial outcome across shards. True atomicity would require a commit to be persisted durably along with a recovery protocol. 
+* Immediate denial on conflict preserves liveness by avoiding deadlocks but can increase abort rates on high contention. A waiting lock-table with timeouts, or deadlock detection would improve throughput under such scenarios.
+* We guard the server state with a single mutex which is easier to reason about for correctness. But this doesn't allow parallelism. Unrelated keys still serialize on this mutex. A fine-grained locking approach where a lock manager does not serialize unrelated keys would scale better.
+* The sharding and transaction ID generation are basic, this should be extended to hash distribution and monotonic ID generation for other workloads.
 
-The idea of brokers is inspired from thread pools. We separate the generation of the workload from its execution. 
-There is scope for concurrency when using synchronous RPC calls as the client is blocked waiting for the response to arrive. 
-A broker's job is to batch requests on the client and send them to the server and process the response. Each client creates multiple brokers per server (configurable through the `brokersPerHost` flag). This ensures that when a broker is waiting for the response, another broker can execute the next request.
-Each broker maintains its own buffered channel (its size is configurable through the `channelBuffer` flag). We first determine the server that the key should go to using the modulo operator and then place the operation on one of the brokers' channels. We assign the operations in a round-robin fashion and block when all the channels are full.
 
-With multiple brokers available at a given time, we also increased the number of workload generators (configurable through `generators` flag). The combined effect of using brokers and multiple workload generators increased the throughput to the final number of _**7.2 million ops/sec**_.
 
-### Trade-offs & Alternatives
 
-Below are a number of alternative strategies with tradeoffs. They could not be implemented due to either time constraints or complexity or minimal performance gain.
 
-#### Asynchronous RPC calls and result handling
-
-Making the RPC calls asynchronous will ensure that a single broker can send a batch and immediately be ready to create the next batch. The results from the asynchronous RPC calls can be handled in a separate goroutine. 
-It is important to restrict the number of result handlers so that too many responses don't put backpressure and add scheduling overhead. This can be implemented using semaphores and a queue for the responses.
-This eliminates the need for too many brokers as a broker can send the next batch immediately.
-
-#### Multiple client-server TCP connections
-
-Each broker can have its own TCP connection instead of a single connection per client-server. This had negligible performance gain as the network utilization was very high.
-
-#### Others
-
-HTTP adds overhead and latency due to headers, TLS handshake etc. We can use raw TCP directly but this adds complexity to implementation. We can also substitute the default `gob` encoding with a custom encoding for a fixed workload.
-
-### Performance Bottleneck Analysis
-
-#### High client CPU utilization
-
-The client CPU utilization is >90% on using a combination of 4 clients and 4 servers while the server utilization is under 60%. The bottleneck pointed to high GC overhead and syscalls.
-Since there were a lot of configurable parameters like `batchSize, batchTimeout, channelBuffer, brokersPerHost`, this pointed to tuning the above parameters using sweeping, instead of a trial and error, to minimize client utilization while maintaining throughput. We could also switch to other serialization methods like Protobuf.
 
 ---
 

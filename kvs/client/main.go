@@ -192,7 +192,6 @@ func runClient(id int, hosts HostList, done *atomic.Bool, workload string, theta
 				err = client.Put(key, value)
 			}
 			if err != nil {
-				fmt.Println(err)
 				abort = true
 				break
 			}
