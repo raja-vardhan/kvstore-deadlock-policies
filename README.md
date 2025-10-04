@@ -132,6 +132,6 @@ To pass additional workload parameter, use
 
 ### Team Contributions
 
-- **Rajavardhan Reddy Siriganagiri**: Client code, serializability, generator code 
-- **Siddharth Kapoor**: Server concurrency control and commit protocol, result analysis
-- **Neha Bhat**: Transaction skelton, workload integrity, Documentation
+- **Rajavardhan Reddy Siriganagiri**: Server code, concurrency control, RPC implementation, serializability
+- **Siddharth Kapoor**: Client code, commit protocol, bank transfer workload, result analysis
+- **Neha Bhat**: Transaction skelton, generator code, workload integrity, Documentation
