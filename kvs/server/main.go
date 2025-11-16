@@ -12,12 +12,18 @@ import (
 	"sync"
 	"time"
 
+	pq "github.com/emirpasic/gods/queues/priorityqueue"
 	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/rstutsman/cs6450-labs/kvs"
 )
 
 var LOCK_DENIED = "LOCK_DENIED"
 var TXN_NOT_FOUND = "TXN_NOT_FOUND"
+
+type Waiter struct {
+	txID kvs.TXID
+	done chan struct{}
+}
 
 type TxRecord struct {
 	id       kvs.TXID
@@ -27,8 +33,9 @@ type TxRecord struct {
 }
 
 type LockState struct {
-	readers map[kvs.TXID]struct{} // S holders
-	writer  kvs.TXID              // X holder
+	readers   map[kvs.TXID]struct{} // S holders
+	writer    kvs.TXID              // X holder
+	waitQueue []Waiter              // Waiting transactions
 }
 
 type Stats struct {
@@ -60,6 +67,73 @@ func NewKVService() *KVService {
 	kvService.txTable = make(map[kvs.TXID]*TxRecord)
 	kvService.lastPrint = time.Now()
 	return kvService
+}
+
+// Is a older than b?
+func isOlder(a kvs.TXID, b kvs.TXID) bool {
+	if a.Lo < b.Lo {
+		return true
+	}
+
+	return false
+}
+
+func canAcquire(lockState *LockState, txID kvs.TXID, mode string) bool {
+	if mode == "S" {
+		// Try to acquire S-lock. Deny only if another transaction is writing to it
+		if lockState.writer != (kvs.TXID{}) && lockState.writer != txID {
+			return false
+		}
+	} else {
+		// Try to acquire X-lock. Deny if another transaction is writing to it or reading from it
+		if lockState.writer != (kvs.TXID{}) {
+			if lockState.writer != txID {
+				return false
+			}
+		} else {
+			for reader, _ := range lockState.readers {
+				if reader != txID {
+					return false
+				}
+			}
+		}
+	}
+
+	return true
+}
+
+func (kv *KVService) acquireLock(lockState *LockState, txID kvs.TXID, mode string) {
+
+	for {
+		if canAcquire(lockState, txID, mode) {
+			return
+		}
+
+		// Abort if older transaction
+		if mode == "S" {
+
+		} else {
+
+		}
+
+		// Wait otherwise for a signal
+		w := Waiter{txID: txID, done: make(chan struct{})}
+		lockState.waitQueue = append(lockState.waitQueue, w)
+
+		<-w.done
+	}
+
+}
+
+func (kv *KVService) releaseLock(lockState *LockState, txID kvs.TXID) {
+
+	delete(lockState.readers, txID)
+	if lockState.writer == txID {
+		lockState.writer = kvs.TXID{}
+	}
+
+	// Ensure that atleast one transaction can progress
+
 }
 
 func (kv *KVService) begin(txID kvs.TXID) error {
@@ -284,6 +358,8 @@ func main() {
 			time.Sleep(1 * time.Second)
 		}
 	}()
+
+	pq.NewWith()
 
 	http.Serve(l, nil)
 }
