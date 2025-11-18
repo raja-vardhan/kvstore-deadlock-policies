@@ -79,24 +79,32 @@ func isOlder(a kvs.TXID, b kvs.TXID) bool {
 }
 
 func canAcquire(lockState *LockState, txID kvs.TXID, mode string) bool {
+
 	if mode == "S" {
+
 		// Try to acquire S-lock. Deny only if another transaction is writing to it
 		if lockState.writer != (kvs.TXID{}) && lockState.writer != txID {
 			return false
 		}
+
+		lockState.readers[txID] = struct{}{}
+
 	} else {
+
 		// Try to acquire X-lock. Deny if another transaction is writing to it or reading from it
 		if lockState.writer != (kvs.TXID{}) {
 			if lockState.writer != txID {
 				return false
 			}
-		} else {
-			for reader, _ := range lockState.readers {
-				if reader != txID {
-					return false
-				}
+		}
+
+		for reader, _ := range lockState.readers {
+			if reader != txID {
+				return false
 			}
 		}
+
+		lockState.writer = txID
 	}
 
 	return true
@@ -105,22 +113,46 @@ func canAcquire(lockState *LockState, txID kvs.TXID, mode string) bool {
 func (kv *KVService) acquireLock(lockState *LockState, txID kvs.TXID, mode string) {
 
 	for {
+
+		// Acquire mutex
+
+		// Try to acquire the S/X lock
 		if canAcquire(lockState, txID, mode) {
 			return
 		}
 
-		// Abort if older transaction
+		// Remove transactions with a younger timestamp and try again
 		if mode == "S" {
-
+			if isOlder(txID, lockState.writer) {
+				// Send Cancel
+			}
 		} else {
 
+			for reader, _ := range lockState.readers {
+				if isOlder(txID, reader) {
+					delete(lockState.readers, reader)
+					// Send cancel
+				}
+			}
+
+			if isOlder(txID, lockState.writer) {
+				// Send cancel
+			}
+		}
+
+		// Try to acquire the S/X lock again
+		if canAcquire(lockState, txID, mode) {
+			return
 		}
 
 		// Wait otherwise for a signal
 		w := Waiter{txID: txID, done: make(chan struct{})}
 		lockState.waitQueue = append(lockState.waitQueue, w)
+		// Release mutex
 
 		<-w.done
+
+		// Acquire mutex
 	}
 
 }
