@@ -28,15 +28,16 @@ func NewWorkload(name string, theta float64) *Workload {
 	switch name {
 	case "YCSB-A":
 		readProbability = 0.50
+		workload.readThreshold = uint64(float64(readProbability) * float64(^uint64(0)))
 	case "YCSB-B":
 		readProbability = 0.95
+		workload.readThreshold = uint64(float64(readProbability) * float64(^uint64(0)))
 	case "YCSB-C":
 		readProbability = 1
+		workload.readThreshold = ^uint64(0) // There is an overflow bug which causes uint64 of a float64 to drop its 1st bit, thereby becoming half of uint64_max
 	default:
 		panic("Unknown workload type: " + name)
 	}
-
-	workload.readThreshold = uint64(float64(readProbability) * float64(^uint64(0)))
 
 	return workload
 }

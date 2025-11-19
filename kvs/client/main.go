@@ -329,6 +329,7 @@ func main() {
 	workload := flag.String("workload", "YCSB-B", "Workload type (YCSB-A, YCSB-B, YCSB-C, xfer)")
 	secs := flag.Int("secs", 30, "Duration in seconds for each client to run")
 	opsPerTx := flag.Int("opsPerTx", 3, "Number of Get or Put operations per transaction")
+	threads := flag.Int("threads", 10, "Number of client threads per process (not for xfer)")
 	// batchSize := flag.Int("batchSize", 8192, "Number of ops per batch before flush")
 	// batchTimeout := flag.Int("batchTimeout", 10, "Max time to wait before flushing a batch (in ms)")
 	// brokersPerHost := flag.Int("brokersPerHost", 8, "Number of brokers per server")
@@ -354,9 +355,12 @@ func main() {
 
 	if *workload != "xfer" {
 		clientId := os.Getpid() // TODO: Check if this is unique across different client processes. Original value was 0
-		go func(clientId int) {
-			runClient(clientId, hosts, &done, *workload, *theta, *opsPerTx)
-		}(clientId)
+		for i := 0; i < *threads; i++ {
+			go func(clientId int) {
+				runClient(clientId, hosts, &done, *workload, *theta, *opsPerTx)
+			}(clientId)
+			clientId++
+		}
 	} else {
 		numClients := 10
 		initDone := atomic.Bool{}
