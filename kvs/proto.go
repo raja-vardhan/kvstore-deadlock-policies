@@ -23,6 +23,12 @@ type TXID struct {
 	Lo uint64
 }
 
+type Waiter struct {
+	TxID TXID
+	Mode string
+	Done chan struct{}
+}
+
 type GetRequest struct {
 	TxID TXID
 	Key  string
