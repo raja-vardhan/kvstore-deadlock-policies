@@ -52,6 +52,7 @@ func (s *Stats) Sub(prev *Stats) Stats {
 }
 
 type KVService struct {
+	// 16 mutexes
 	mu        sync.Mutex
 	mp        cmap.ConcurrentMap[string, string]
 	lockTable map[string]*LockState
@@ -108,75 +109,75 @@ func (kv *KVService) createTranRecordIfAbsent(txID kvs.TXID) *TxRecord {
 	return kv.txTable[txID]
 }
 
-func canAcquire(lockState *LockState, txID kvs.TXID, mode string) bool {
+func canAcquire(key string, lockState *LockState, txRecord TxRecord, mode string) bool {
 
 	if mode == "S" {
 
 		// Try to acquire S-lock. Deny only if another transaction is writing to it
-		if lockState.writer != (kvs.TXID{}) && lockState.writer != txID {
+		if lockState.writer != (kvs.TXID{}) && lockState.writer != txRecord.id {
 			return false
 		}
 
-		lockState.readers[txID] = struct{}{}
+		lockState.readers[txRecord.id] = struct{}{}
 
 	} else {
 
 		// Try to acquire X-lock. Deny if another transaction is writing to it or reading from it
 		if lockState.writer != (kvs.TXID{}) {
-			if lockState.writer != txID {
+			if lockState.writer != txRecord.id {
 				return false
 			}
 		}
 
 		for reader, _ := range lockState.readers {
-			if reader != txID {
+			if reader != txRecord.id {
 				return false
 			}
 		}
 
-		lockState.writer = txID
+		lockState.writer = txRecord.id
 	}
 
 	return true
 }
 
-func (kv *KVService) acquireLock(lockState *LockState, txID kvs.TXID, mode string) {
+func (kv *KVService) acquireLock(key string, lockState *LockState, txRecord TxRecord, mode string) {
 
 	for {
 
 		// Acquire mutex
 
 		// Try to acquire the S/X lock
-		if canAcquire(lockState, txID, mode) {
+		if canAcquire(key, lockState, txRecord, mode) {
 			return
 		}
 
-		// Remove transactions with a younger timestamp and try again
+		// Remove transactions with a younger timestamp
 		if mode == "S" {
-			if isOlder(txID, lockState.writer) {
+			if isOlder(txRecord.id, lockState.writer) {
 				// Send Cancel
 			}
 		} else {
 
 			for reader, _ := range lockState.readers {
-				if isOlder(txID, reader) {
+				if isOlder(txRecord.id, reader) {
 					delete(lockState.readers, reader)
 					// Send cancel
 				}
 			}
 
-			if isOlder(txID, lockState.writer) {
+			if isOlder(txRecord.id, lockState.writer) {
 				// Send cancel
 			}
 		}
 
 		// Try to acquire the S/X lock again
-		if canAcquire(lockState, txID, mode) {
+		if canAcquire(key, lockState, txRecord, mode) {
 			return
 		}
 
 		// Wait otherwise for a signal
-		w := Waiter{txID: txID, done: make(chan struct{})}
+		w := Waiter{txID: txRecord.id, done: make(chan struct{})}
 		lockState.waitQueue.Enqueue(w)
 		// Release mutex
 
@@ -234,12 +235,9 @@ func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) err
 	lockState := kv.createLockStateIfAbsent(request.Key)
 
 	// Try to acquire S-lock. Deny only if another transaction holds it
-	if lockState.writer != (kvs.TXID{}) && lockState.writer != request.TxID {
-		return errors.New(LOCK_DENIED)
-	}
+	kv.acquireLock(request.Key, lockState, *txRecord, "S")
 
-	// Update readers of the key and the read set of the transaction
-	lockState.readers[request.TxID] = struct{}{}
+	// Acquired S-lock, update read set of the transaction
 	txRecord.readSet[request.Key] = struct{}{}
 
 	// Get value from map
@@ -270,22 +268,12 @@ func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) err
 	// Check if lockState for the key exists, if not create it
 	lockState := kv.createLockStateIfAbsent(request.Key)
 
-	// Try to acquire X-lock. Return LOCK_DENIED if failed
-	if lockState.writer != (kvs.TXID{}) {
-		if lockState.writer != request.TxID {
-			return errors.New(LOCK_DENIED)
-		}
-	} else {
-		for key, _ := range lockState.readers {
-			if key != request.TxID {
-				return errors.New(LOCK_DENIED)
-			}
-		}
-	}
+	// Try to acquire X-lock. Deny only if another transaction holds it
+	kv.acquireLock(request.Key, lockState, *txRecord, "X")
 
-	// Can safely grant lock
-	lockState.writer = request.TxID
+	// Acquired X-lock, update write set of the transaction
 	txRecord.writeSet[request.Key] = request.Value
+
 	return nil
 
 }
@@ -402,8 +390,6 @@ func main() {
 			time.Sleep(1 * time.Second)
 		}
 	}()
-
-	pq.NewWith()
 
 	http.Serve(l, nil)
 }
