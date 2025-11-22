@@ -38,6 +38,13 @@ type Transaction struct {
 // ------------------------------------------------------------
 
 // --------------Server RPC Request and Response---------------
+type BeginRequest struct {
+	TxID TXID
+}
+
+type BeginResponse struct {
+}
+
 type GetRequest struct {
 	TxID TXID
 	Key  string
