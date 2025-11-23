@@ -255,10 +255,12 @@ func runClient(id int, hosts HostList, done *atomic.Bool, workload string, theta
 }
 
 func serializabilityTest(id int, hosts HostList, done *atomic.Bool, numClients int, initDone *atomic.Bool) {
+	fmt.Println("Inside xfer")
 	rpcClients := make([]*rpc.Client, len(hosts))
 	for i, host := range hosts {
 		rpcClients[i] = Dial(host)
 	}
+	fmt.Println("Established connections")
 	client := Worker{rpcClients: rpcClients, workerID: uint64(id)}
 	checkBal := 0
 	initAmt := 1000
@@ -273,7 +275,9 @@ func serializabilityTest(id int, hosts HostList, done *atomic.Bool, numClients i
 				continue
 			}
 			if !client.txActive {
-				client.Begin(client.txID)
+				txID := newTxID(uint64(id))
+				client.txID = &txID
+				client.Begin(&txID)
 			}
 			for i := 0; i < numClients; i++ {
 				acctId := fmt.Sprintf("%d", i)
@@ -295,6 +299,7 @@ func serializabilityTest(id int, hosts HostList, done *atomic.Bool, numClients i
 			if checkBal == 1 {
 				if !client.txActive {
 					txID := newTxID(uint64(id))
+					client.txID = &txID
 					client.Begin(&txID)
 				}
 				sum := 0
