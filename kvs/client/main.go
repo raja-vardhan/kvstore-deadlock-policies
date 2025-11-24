@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -12,20 +13,26 @@ import (
 	"time"
 
 	"github.com/rstutsman/cs6450-labs/kvs"
+	"github.com/rstutsman/cs6450-labs/kvs/utils"
 )
 
-type Client struct {
-	rpcClients   []*rpc.Client // RPC clients to all the servers
-	clientID     uint64        // globally unique per client
-	txID         *TxID         // current transaction ID
-	txActive     bool          // is a transaction ongoing?
-	participants map[int]bool  // idx -> rpcClient
+type CancelService struct {
 }
 
-type TxID struct{ Hi, Lo uint64 } // include clientID for uniqueness
+func (cs *CancelService) CancelTransaction(txs []kvs.TXID) {
 
-func newTxID(clientID uint64) *TxID {
-	return &TxID{
+}
+
+type Worker struct {
+	rpcClients []*rpc.Client // RPC clients to all the servers
+	workerID   uint64        // globally unique per worker
+	txID       *kvs.TXID     // current transaction ID
+	txActive   bool          // is a transaction ongoing?
+	// participants map[int]bool  // idx -> rpcClient
+}
+
+func newTxID(clientID uint64) kvs.TXID {
+	return kvs.TXID{
 		Hi: clientID,
 		Lo: uint64(time.Now().UnixNano()), // simple time-based randomness
 	}
@@ -60,21 +67,36 @@ func hashKey(key string) int {
 	return h
 }
 
-func (c *Client) Begin() {
-	c.txID = newTxID(c.clientID)
+func (c *Worker) Begin(txID *kvs.TXID) error {
+
+	c.txID = txID
 	c.txActive = true
-	c.participants = make(map[int]bool, len(c.rpcClients))
+
+	args := kvs.BeginRequest{
+		TxID: *txID,
+	}
+	reply := &kvs.BeginResponse{}
+
+	for serverIdx := range len(serverAddrs) {
+		err := c.rpcClients[serverIdx].Call("KVService.Begin", args, reply)
+
+		if err != nil {
+			return errors.New("cannot start transaction")
+		}
+	}
+
+	return nil
 }
 
-func (c *Client) Get(key string) (string, error) {
+func (c *Worker) Get(key string) (string, error) {
 	if !c.txActive {
 		return "", fmt.Errorf("transaction not active")
 	}
 
 	serverIdx := getServerIdx(key)
-	if _, ok := c.participants[serverIdx]; !ok {
-		c.participants[serverIdx] = true
-	}
+	// if _, ok := c.participants[serverIdx]; !ok {
+	// 	c.participants[serverIdx] = true
+	// }
 
 	args := &kvs.GetRequest{
 		Key:  key,
@@ -91,15 +113,15 @@ func (c *Client) Get(key string) (string, error) {
 	return reply.Value, nil
 }
 
-func (c *Client) Put(key, val string) error {
+func (c *Worker) Put(key, val string) error {
 	if !c.txActive {
 		return fmt.Errorf("transaction not active")
 	}
 
 	serverIdx := getServerIdx(key)
-	if _, ok := c.participants[serverIdx]; !ok {
-		c.participants[serverIdx] = true
-	}
+	// if _, ok := c.participants[serverIdx]; !ok {
+	// 	c.participants[serverIdx] = true
+	// }
 
 	args := &kvs.PutRequest{
 		Key:   key,
@@ -117,7 +139,7 @@ func (c *Client) Put(key, val string) error {
 	return nil
 }
 
-func (c *Client) Commit() error {
+func (c *Worker) Commit() error {
 	if !c.txActive {
 		return fmt.Errorf("transaction not active")
 	}
@@ -125,7 +147,7 @@ func (c *Client) Commit() error {
 	args := &kvs.CommitRequest{TxID: kvs.TXID(*c.txID)}
 	reply := &kvs.CommitResponse{}
 	count := 0
-	for idx, _ := range c.participants {
+	for idx := range len(serverAddrs) {
 		if count == 0 {
 			args.Flag = true
 			count++
@@ -137,11 +159,10 @@ func (c *Client) Commit() error {
 	}
 	c.txActive = false
 	c.txID = nil
-	c.participants = nil
 	return nil
 }
 
-func (c *Client) Abort() error {
+func (c *Worker) Abort() error {
 	if !c.txActive {
 		return fmt.Errorf("transaction not active")
 	}
@@ -149,7 +170,7 @@ func (c *Client) Abort() error {
 	args := &kvs.AbortRequest{TxID: kvs.TXID(*c.txID)}
 	reply := &kvs.AbortResponse{}
 	count := 0
-	for idx, _ := range c.participants {
+	for idx := range len(serverAddrs) {
 		if count == 0 {
 			args.Flag = true
 			count++
@@ -165,51 +186,82 @@ func (c *Client) Abort() error {
 //----------------workloads-----------
 
 func runClient(id int, hosts HostList, done *atomic.Bool, workload string, theta float64, opsPerTx int) {
+
 	rpcClients := make([]*rpc.Client, len(hosts))
 	for i, host := range hosts {
 		rpcClients[i] = Dial(host)
 	}
-	client := Client{rpcClients: rpcClients, clientID: uint64(id)}
+
+	// Initialize work queue
+	transactionQueue := make(chan *kvs.Transaction, 10000)
+
+	// Initialize producer
 	wl := kvs.NewWorkload(workload, theta)
-	value := strings.Repeat("x", 128)
-	txOps := make([]kvs.WorkloadOp, opsPerTx)
-	for !done.Load() {
-		abort := false
-		if !client.txActive { // If true retry the previous transaction
-			client.Begin()
-			txOps = txOps[:0] // Empty the transaction list as we do not need to repeat the transaction
-			for i := range opsPerTx {
-				txOps = append(txOps, wl.Next())
-				_ = i
-			}
+	go func() {
+		for !done.Load() {
+			transactionQueue <- utils.GenerateRandomTransaction(wl, opsPerTx)
 		}
-		for _, op := range txOps {
-			key := fmt.Sprintf("%d", op.Key)
-			var err error
-			if op.IsRead {
-				_, err = client.Get(key)
-			} else {
-				err = client.Put(key, value)
+	}()
+
+	// Initialize workers (pick up transaction from work queue, execute and abort if required)
+	NUM_OF_WORKERS := 10
+	for i := 0; i < NUM_OF_WORKERS; i++ {
+		go func() {
+			worker := Worker{rpcClients: rpcClients, workerID: uint64(i)}
+
+			for !done.Load() {
+
+				txn := <-transactionQueue
+
+				txn.TxID = newTxID(worker.workerID)
+
+				txnDone := false
+
+				// Execute transaction
+				for !txnDone {
+					for _, op := range txn.Ops {
+
+						var err error
+
+						switch op.Type {
+						case kvs.OpBegin:
+							err = worker.Begin(&txn.TxID)
+						case kvs.OpGet:
+							_, err = worker.Get(op.Key)
+						case kvs.OpPut:
+							err = worker.Put(op.Key, op.Value)
+						case kvs.OpCommit:
+							err = worker.Commit()
+						default:
+						}
+
+						if err != nil {
+							worker.Abort()
+							break
+						}
+
+						if op.Type == kvs.OpCommit && err == nil {
+							txnDone = true
+						}
+
+					}
+				}
+
 			}
-			if err != nil {
-				abort = true
-				break
-			}
-		}
-		if abort {
-			client.Abort()
-		} else {
-			client.Commit()
-		}
+		}()
+
 	}
+
 }
 
 func serializabilityTest(id int, hosts HostList, done *atomic.Bool, numClients int, initDone *atomic.Bool) {
+	fmt.Println("Inside xfer")
 	rpcClients := make([]*rpc.Client, len(hosts))
 	for i, host := range hosts {
 		rpcClients[i] = Dial(host)
 	}
-	client := Client{rpcClients: rpcClients, clientID: uint64(id)}
+	fmt.Println("Established connections")
+	client := Worker{rpcClients: rpcClients, workerID: uint64(id)}
 	checkBal := 0
 	initAmt := 1000
 	txnAmt := 100
@@ -223,7 +275,9 @@ func serializabilityTest(id int, hosts HostList, done *atomic.Bool, numClients i
 				continue
 			}
 			if !client.txActive {
-				client.Begin()
+				txID := newTxID(uint64(id))
+				client.txID = &txID
+				client.Begin(&txID)
 			}
 			for i := 0; i < numClients; i++ {
 				acctId := fmt.Sprintf("%d", i)
@@ -244,7 +298,9 @@ func serializabilityTest(id int, hosts HostList, done *atomic.Bool, numClients i
 		} else {
 			if checkBal == 1 {
 				if !client.txActive {
-					client.Begin()
+					txID := newTxID(uint64(id))
+					client.txID = &txID
+					client.Begin(&txID)
 				}
 				sum := 0
 				balances = balances[:0]
@@ -271,7 +327,8 @@ func serializabilityTest(id int, hosts HostList, done *atomic.Bool, numClients i
 				}
 			} else {
 				if !client.txActive {
-					client.Begin()
+					txID := newTxID(uint64(id))
+					client.Begin(&txID)
 				}
 				src := fmt.Sprintf("%d", id)
 				dst := fmt.Sprintf("%d", (id+1)%numClients)
