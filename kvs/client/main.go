@@ -28,7 +28,6 @@ type Worker struct {
 	workerID   uint64        // globally unique per worker
 	txID       *kvs.TXID     // current transaction ID
 	txActive   bool          // is a transaction ongoing?
-	// participants map[int]bool  // idx -> rpcClient
 }
 
 func newTxID(clientID uint64) kvs.TXID {
@@ -50,7 +49,6 @@ var serverAddrs []string
 
 // Helper to pick server address for key
 func getServerIdx(key string) int {
-	// This must match the modulo rule you're using
 	k := hashKey(key)
 	serverIdx := k % len(serverAddrs)
 	return serverIdx
@@ -94,19 +92,18 @@ func (c *Worker) Get(key string) (string, error) {
 	}
 
 	serverIdx := getServerIdx(key)
-	// if _, ok := c.participants[serverIdx]; !ok {
-	// 	c.participants[serverIdx] = true
-	// }
 
 	args := &kvs.GetRequest{
 		Key:  key,
-		TxID: kvs.TXID{Hi: c.txID.Hi, Lo: c.txID.Lo},
+		TxID: *c.txID,
 	}
 	reply := &kvs.GetResponse{}
+
 	err := c.rpcClients[serverIdx].Call("KVService.Get", args, reply)
 	if err != nil {
 		return "", err
 	}
+
 	if reply.Status == kvs.TxAborted {
 		return "", fmt.Errorf("transaction aborted")
 	}
@@ -119,16 +116,14 @@ func (c *Worker) Put(key, val string) error {
 	}
 
 	serverIdx := getServerIdx(key)
-	// if _, ok := c.participants[serverIdx]; !ok {
-	// 	c.participants[serverIdx] = true
-	// }
 
 	args := &kvs.PutRequest{
 		Key:   key,
 		Value: val,
-		TxID:  kvs.TXID{Hi: c.txID.Hi, Lo: c.txID.Lo},
+		TxID:  *c.txID,
 	}
 	reply := &kvs.PutResponse{}
+
 	err := c.rpcClients[serverIdx].Call("KVService.Put", args, reply)
 	if err != nil {
 		return err
@@ -136,6 +131,7 @@ func (c *Worker) Put(key, val string) error {
 	if reply.Status == kvs.TxAborted {
 		return fmt.Errorf("transaction aborted")
 	}
+
 	return nil
 }
 
@@ -144,19 +140,22 @@ func (c *Worker) Commit() error {
 		return fmt.Errorf("transaction not active")
 	}
 
-	args := &kvs.CommitRequest{TxID: kvs.TXID(*c.txID)}
+	args := &kvs.CommitRequest{TxID: *c.txID}
 	reply := &kvs.CommitResponse{}
-	count := 0
+
 	for idx := range len(serverAddrs) {
-		if count == 0 {
+		if idx == 0 {
 			args.Flag = true
-			count++
+		} else {
+			args.Flag = false
 		}
+
 		err := c.rpcClients[idx].Call("KVService.Commit", args, reply)
 		if err != nil {
 			return err
 		}
 	}
+
 	c.txActive = false
 	c.txID = nil
 	return nil
@@ -169,17 +168,22 @@ func (c *Worker) Abort() error {
 
 	args := &kvs.AbortRequest{TxID: kvs.TXID(*c.txID)}
 	reply := &kvs.AbortResponse{}
-	count := 0
+
 	for idx := range len(serverAddrs) {
-		if count == 0 {
+		if idx == 0 {
 			args.Flag = true
-			count++
+		} else {
+			args.Flag = false
 		}
+
 		err := c.rpcClients[idx].Call("KVService.Abort", args, reply)
 		if err != nil {
 			return err
 		}
 	}
+
+	c.txActive = false
+	c.txID = nil
 	return nil
 }
 
@@ -255,12 +259,12 @@ func runClient(id int, hosts HostList, done *atomic.Bool, workload string, theta
 }
 
 func serializabilityTest(id int, hosts HostList, done *atomic.Bool, numClients int, initDone *atomic.Bool) {
-	fmt.Println("Inside xfer")
+	// fmt.Println("Inside xfer")
 	rpcClients := make([]*rpc.Client, len(hosts))
 	for i, host := range hosts {
 		rpcClients[i] = Dial(host)
 	}
-	fmt.Println("Established connections")
+	// fmt.Println("Established connections")
 	client := Worker{rpcClients: rpcClients, workerID: uint64(id)}
 	checkBal := 0
 	initAmt := 1000

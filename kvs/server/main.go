@@ -135,13 +135,16 @@ func canAcquire(key string, lockState *LockState, txRecord TxRecord, mode string
 	return true
 }
 
-func markTransactionInactive(txID *kvs.TXID, lockState *LockState, txTable *map[kvs.TXID]*TxRecord) {
+func (kv *KVService) woundTransaction(txID *kvs.TXID) {
 
-	delete(*txTable, *txID)
-	if lockState.writer == *txID {
-		lockState.writer = kvs.TXID{}
+	txRecord, ok := kv.txTable[*txID]
+	if !ok {
+		return
 	}
-	delete(lockState.readers, *txID)
+
+	kv.releaseLock(txRecord)
+
+	delete(kv.txTable, *txID)
 }
 
 func (kv *KVService) acquireLock(key string, lockState *LockState, txRecord TxRecord, mode string) {
@@ -155,11 +158,11 @@ func (kv *KVService) acquireLock(key string, lockState *LockState, txRecord TxRe
 
 		// Remove transactions with a younger timestamp
 		if isOlder(txRecord.id, lockState.writer) {
-			markTransactionInactive(&lockState.writer, lockState, &kv.txTable)
+			kv.woundTransaction(&lockState.writer)
 		}
 		for reader, _ := range lockState.readers {
 			if isOlder(txRecord.id, reader) {
-				markTransactionInactive(&reader, lockState, &kv.txTable)
+				kv.woundTransaction(&reader)
 			}
 		}
 
@@ -183,25 +186,43 @@ func (kv *KVService) acquireLock(key string, lockState *LockState, txRecord TxRe
 
 }
 
-// Wake the next waiting transaction (if any)
+// // Wake the next waiting transaction (if any)
+// func (kv *KVService) wakeNext(lockState *LockState) {
+// 	if lockState.waitQueue.Empty() {
+// 		return
+// 	}
+
+// 	// Pop the highest-priority waiter (oldest TX)
+// 	wRaw, _ := lockState.waitQueue.Dequeue()
+// 	w := wRaw.(Waiter)
+
+// 	// Skip aborted transactions
+// 	if _, ok := kv.txTable[w.txID]; !ok {
+// 		// recursively wake next (this one is dead)
+// 		kv.wakeNext(lockState)
+// 		return
+// 	}
+
+// 	// Wake one waiter
+// 	close(w.done) // Unblocks the waiter in acquireLock()
+// }
+
 func (kv *KVService) wakeNext(lockState *LockState) {
-	if lockState.waitQueue.Empty() {
+	for !lockState.waitQueue.Empty() {
+		wRaw, _ := lockState.waitQueue.Dequeue()
+		w := wRaw.(Waiter)
+
+		if _, ok := kv.txTable[w.txID]; !ok {
+			// Transaction already aborted; wake the goroutine so it can see that.
+			close(w.done)
+			// And continue to look for the next valid waiter
+			continue
+		}
+
+		// Valid active transaction
+		close(w.done)
 		return
 	}
-
-	// Pop the highest-priority waiter (oldest TX)
-	wRaw, _ := lockState.waitQueue.Dequeue()
-	w := wRaw.(Waiter)
-
-	// Skip aborted transactions
-	if _, ok := kv.txTable[w.txID]; !ok {
-		// recursively wake next (this one is dead)
-		kv.wakeNext(lockState)
-		return
-	}
-
-	// Wake one waiter
-	close(w.done) // Unblocks the waiter in acquireLock()
 }
 
 func (kv *KVService) releaseLock(txRecord *TxRecord) {
@@ -240,7 +261,7 @@ func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) err
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 
-	fmt.Println("Get", request)
+	// fmt.Println("Get", request)
 
 	// Check if the transaction record exists
 	txRecord, ok := kv.txTable[request.TxID]
@@ -282,7 +303,7 @@ func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) err
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 
-	fmt.Println("Put", request)
+	// fmt.Println("Put", request)
 
 	// Check if the transaction record exists
 	txRecord, ok := kv.txTable[request.TxID]
@@ -317,11 +338,10 @@ func (kv *KVService) Commit(request *kvs.CommitRequest, response *kvs.CommitResp
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 
-	fmt.Println("Commit ", request)
-
 	// Check if the transaction record exists
 	txRecord, ok := kv.txTable[request.TxID]
 	if !ok {
+		// fmt.Println("Transaction preempted ", request.TxID)
 		return errors.New("TXN_NOT_FOUND")
 	}
 
@@ -340,6 +360,8 @@ func (kv *KVService) Commit(request *kvs.CommitRequest, response *kvs.CommitResp
 		kv.stats.commits++
 	}
 
+	// fmt.Println("Commiting request ", request)
+
 	return nil
 }
 
@@ -347,9 +369,12 @@ func (kv *KVService) Abort(request *kvs.AbortRequest, response *kvs.AbortRespons
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 
+	// fmt.Println("Abort ", request)
+
 	// Check if the transaction record exists
 	txRecord, ok := kv.txTable[request.TxID]
 	if !ok {
+		// fmt.Println("Transaction preempted ", request.TxID)
 		return nil
 	}
 
@@ -362,6 +387,8 @@ func (kv *KVService) Abort(request *kvs.AbortRequest, response *kvs.AbortRespons
 	if request.Flag {
 		kv.stats.aborts++
 	}
+
+	// fmt.Println("Aborting request ", request)
 
 	return nil
 }
@@ -388,6 +415,32 @@ func (kv *KVService) printStats() {
 		float64(diff.aborts)/deltaS,
 		float64(diff.commits+diff.aborts)/deltaS)
 }
+
+// func (kv *KVService) printStats() {
+// 	kv.mu.Lock()
+// 	defer kv.mu.Unlock()
+
+// 	// current absolute stats
+// 	current := kv.stats
+
+// 	// compute diff FIRST
+// 	diff := current.Sub(&kv.prevStats)
+
+// 	// compute delta time
+// 	now := time.Now()
+// 	deltaS := now.Sub(kv.lastPrint).Seconds()
+
+// 	// NOW update prevStats and lastPrint
+// 	kv.prevStats = current
+// 	kv.lastPrint = now
+
+// 	fmt.Printf(
+// 		"commits/s %.2f\naborts/s %.2f\nops/s %.2f\n\n",
+// 		float64(diff.commits)/deltaS,
+// 		float64(diff.aborts)/deltaS,
+// 		float64(diff.commits+diff.aborts)/deltaS,
+// 	)
+// }
 
 func main() {
 	go func() {
