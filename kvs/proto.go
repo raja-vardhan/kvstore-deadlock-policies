@@ -6,9 +6,11 @@ type TxStatus int
 const (
 	TxOK TxStatus = iota
 	TxAborted
+	TxPrepared
 )
 
 type TXID struct {
+	ID uint32
 	Hi uint64
 	Lo uint64
 }
@@ -64,6 +66,14 @@ type PutRequest struct {
 
 type PutResponse struct {
 	TxID   TXID
+	Status TxStatus
+}
+
+type PrepareRequest struct {
+	TxID TXID
+}
+
+type PrepareResponse struct {
 	Status TxStatus
 }
 

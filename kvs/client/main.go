@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/binary"
 	"errors"
 	"flag"
 	"fmt"
@@ -16,13 +18,6 @@ import (
 	"github.com/rstutsman/cs6450-labs/kvs/utils"
 )
 
-type CancelService struct {
-}
-
-func (cs *CancelService) CancelTransaction(txs []kvs.TXID) {
-
-}
-
 type Worker struct {
 	rpcClients []*rpc.Client // RPC clients to all the servers
 	workerID   uint64        // globally unique per worker
@@ -31,9 +26,14 @@ type Worker struct {
 }
 
 func newTxID(clientID uint64) kvs.TXID {
+
+	var rnd uint64
+	binary.Read(rand.Reader, binary.BigEndian, &rnd)
+
 	return kvs.TXID{
-		Hi: clientID,
-		Lo: uint64(time.Now().UnixNano()), // simple time-based randomness
+		ID: uint32(clientID),
+		Hi: uint64(time.Now().UnixNano()),
+		Lo: rnd,
 	}
 }
 
@@ -140,17 +140,29 @@ func (c *Worker) Commit() error {
 		return fmt.Errorf("transaction not active")
 	}
 
-	args := &kvs.CommitRequest{TxID: *c.txID}
-	reply := &kvs.CommitResponse{}
+	// Prepare phase
+	prepareArgs := &kvs.PrepareRequest{TxID: *c.txID}
+	prepareReply := &kvs.PrepareResponse{}
+
+	for idx := range len(serverAddrs) {
+		err := c.rpcClients[idx].Call("KVService.Prepare", prepareArgs, prepareReply)
+		if err != nil || prepareReply.Status == kvs.TxAborted {
+			return fmt.Errorf("prepare failed")
+		}
+	}
+
+	// Commit phase
+	commitArgs := &kvs.CommitRequest{TxID: *c.txID}
+	commitReply := &kvs.CommitResponse{}
 
 	for idx := range len(serverAddrs) {
 		if idx == 0 {
-			args.Flag = true
+			commitArgs.Flag = true
 		} else {
-			args.Flag = false
+			commitArgs.Flag = false
 		}
 
-		err := c.rpcClients[idx].Call("KVService.Commit", args, reply)
+		err := c.rpcClients[idx].Call("KVService.Commit", commitArgs, commitReply)
 		if err != nil {
 			return err
 		}
@@ -278,11 +290,11 @@ func serializabilityTest(id int, hosts HostList, done *atomic.Bool, numClients i
 			if id != 0 {
 				continue
 			}
-			if !client.txActive {
-				txID := newTxID(uint64(id))
-				client.txID = &txID
-				client.Begin(&txID)
-			}
+
+			txID := newTxID(uint64(id))
+			client.txID = &txID
+			client.Begin(&txID)
+
 			for i := 0; i < numClients; i++ {
 				acctId := fmt.Sprintf("%d", i)
 				amt := fmt.Sprintf("%d", initAmt)
@@ -295,17 +307,22 @@ func serializabilityTest(id int, hosts HostList, done *atomic.Bool, numClients i
 			if abort {
 				client.Abort()
 			} else {
-				client.Commit()
-				initDone.Store(true)
-				checkBal = (checkBal + 1) % freq
+				err := client.Commit()
+				if err == nil {
+					initDone.Store(true)
+					checkBal = (checkBal + 1) % freq
+					fmt.Println("Initialized all accounts with 1000")
+				} else {
+					client.Abort()
+				}
 			}
 		} else {
 			if checkBal == 1 {
-				if !client.txActive {
-					txID := newTxID(uint64(id))
-					client.txID = &txID
-					client.Begin(&txID)
-				}
+
+				txID := newTxID(uint64(id))
+				client.txID = &txID
+				client.Begin(&txID)
+
 				sum := 0
 				balances = balances[:0]
 				for i := 0; i < numClients; i++ {
@@ -322,18 +339,23 @@ func serializabilityTest(id int, hosts HostList, done *atomic.Bool, numClients i
 				if abort {
 					client.Abort()
 				} else {
-					client.Commit()
-					checkBal = (checkBal + 1) % freq
-					if sum != total {
-						fmt.Println("VIOLATION!!!")
+					err := client.Commit()
+
+					if err == nil {
+						checkBal = (checkBal + 1) % freq
+						if sum != total {
+							fmt.Println("VIOLATION!!!")
+						}
+						fmt.Println("Sum:", sum, balances)
+					} else {
+						client.Abort()
 					}
-					fmt.Println("Sum:", sum, balances)
 				}
 			} else {
-				if !client.txActive {
-					txID := newTxID(uint64(id))
-					client.Begin(&txID)
-				}
+
+				txID := newTxID(uint64(id))
+				client.Begin(&txID)
+
 				src := fmt.Sprintf("%d", id)
 				dst := fmt.Sprintf("%d", (id+1)%numClients)
 				srcBal, err := client.Get(src)
@@ -364,8 +386,12 @@ func serializabilityTest(id int, hosts HostList, done *atomic.Bool, numClients i
 					client.Abort()
 					continue
 				}
-				client.Commit()
-				checkBal = (checkBal + 1) % freq
+				err = client.Commit()
+				if err == nil {
+					checkBal = (checkBal + 1) % freq
+				} else {
+					client.Abort()
+				}
 			}
 		}
 	}
