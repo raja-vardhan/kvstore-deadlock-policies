@@ -1,5 +1,63 @@
 package kvs
 
+// ---------
+type TxStatus int
+
+const (
+	TxOK TxStatus = iota
+	TxAborted
+	TxPrepared
+)
+
+type TXID struct {
+	ID uint32
+	Hi uint64
+	Lo uint64
+}
+
+// --------------Types of operations and transaction------------
+type OpType int
+
+const (
+	OpBegin OpType = iota
+	OpGet
+	OpPut
+	OpCommit
+	OpAbort
+)
+
+type Operation struct {
+	Type  OpType
+	Key   string
+	Value string
+}
+
+type Transaction struct {
+	TxID TXID
+	Ops  []Operation
+}
+
+// ------------------------------------------------------------
+
+// --------------Server RPC Request and Response---------------
+type BeginRequest struct {
+	TxID TXID
+}
+
+type BeginResponse struct {
+}
+
+type GetRequest struct {
+	TxID TXID
+	Key  string
+}
+
+type GetResponse struct {
+	TxID   TXID
+	Value  string
+	Status TxStatus
+}
+
 type PutRequest struct {
 	TxID  TXID
 	Key   string
@@ -11,26 +69,11 @@ type PutResponse struct {
 	Status TxStatus
 }
 
-type TxStatus int
-
-const (
-	TxOK TxStatus = iota
-	TxAborted
-)
-
-type TXID struct {
-	Hi uint64
-	Lo uint64
-}
-
-type GetRequest struct {
+type PrepareRequest struct {
 	TxID TXID
-	Key  string
 }
 
-type GetResponse struct {
-	TxID   TXID
-	Value  string
+type PrepareResponse struct {
 	Status TxStatus
 }
 
