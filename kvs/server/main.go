@@ -19,6 +19,7 @@ import (
 
 var LOCK_DENIED = "LOCK_DENIED"
 var TXN_NOT_FOUND = "TXN_NOT_FOUND"
+var TXN_ABORTED = "TXN_ABORTED"
 
 type Waiter struct {
 	txID kvs.TXID
@@ -26,15 +27,31 @@ type Waiter struct {
 }
 
 func TXIDComparator(a, b interface{}) int {
-	tx1 := a.(Waiter)
-	tx2 := b.(Waiter)
+	tx1 := a.(*Waiter)
+	tx2 := b.(*Waiter)
 
-	if tx1.txID.Lo < tx2.txID.Lo {
+	if tx1.txID.Hi < tx2.txID.Hi {
+		return -1
+	}
+
+	if tx1.txID.Hi > tx2.txID.Hi {
 		return 1
 	}
 
-	if tx1.txID.Lo > tx2.txID.Lo {
+	if tx1.txID.Lo < tx2.txID.Lo {
 		return -1
+	}
+
+	if tx1.txID.Lo > tx2.txID.Lo {
+		return 1
+	}
+
+	if tx1.txID.ID < tx2.txID.ID {
+		return -1
+	}
+
+	if tx1.txID.ID > tx2.txID.ID {
+		return 1
 	}
 
 	return 0
@@ -43,8 +60,8 @@ func TXIDComparator(a, b interface{}) int {
 type TxRecord struct {
 	id       kvs.TXID
 	status   kvs.TxStatus
-	writeSet map[string]string   // staged writes
-	readSet  map[string]struct{} // optional
+	writeSet map[string]string // staged writes
+	readSet  map[string]string // optional
 }
 
 type LockState struct {
@@ -66,7 +83,6 @@ func (s *Stats) Sub(prev *Stats) Stats {
 }
 
 type KVService struct {
-	// 16 mutexes
 	mu        sync.Mutex
 	mp        cmap.ConcurrentMap[string, string]
 	lockTable map[string]*LockState
@@ -87,7 +103,14 @@ func NewKVService() *KVService {
 
 // Is a older than b?
 func isOlder(a kvs.TXID, b kvs.TXID) bool {
-	return a.Lo < b.Lo
+	if a.Hi != b.Hi {
+		return a.Hi < b.Hi
+	}
+	if a.Lo != b.Lo {
+		return a.Lo < b.Lo
+	}
+
+	return a.ID < b.ID
 }
 
 func (kv *KVService) createLockStateIfAbsent(key string) *LockState {
@@ -103,7 +126,7 @@ func (kv *KVService) createLockStateIfAbsent(key string) *LockState {
 
 }
 
-func canAcquire(key string, lockState *LockState, txRecord TxRecord, mode string) bool {
+func canAcquire(lockState *LockState, txRecord *TxRecord, mode string) bool {
 
 	if mode == "S" {
 
@@ -112,15 +135,13 @@ func canAcquire(key string, lockState *LockState, txRecord TxRecord, mode string
 			return false
 		}
 
-		lockState.readers[txRecord.id] = struct{}{}
+		return true
 
 	} else {
 
 		// Try to acquire X-lock. Deny if another transaction is writing to it or reading from it
-		if lockState.writer != (kvs.TXID{}) {
-			if lockState.writer != txRecord.id {
-				return false
-			}
+		if lockState.writer != (kvs.TXID{}) && lockState.writer != txRecord.id {
+			return false
 		}
 
 		for reader, _ := range lockState.readers {
@@ -129,93 +150,118 @@ func canAcquire(key string, lockState *LockState, txRecord TxRecord, mode string
 			}
 		}
 
-		lockState.writer = txRecord.id
+		return true
 	}
-
-	return true
 }
 
-func markTransactionInactive(txID *kvs.TXID, lockState *LockState, txTable *map[kvs.TXID]*TxRecord) {
+func (kv *KVService) woundTransaction(txID kvs.TXID) {
 
-	delete(*txTable, *txID)
-	if lockState.writer == *txID {
-		lockState.writer = kvs.TXID{}
+	if txRecord, ok := kv.txTable[txID]; !ok || txRecord.status == kvs.TxAborted {
+		return
+	} else {
+
+		txRecord.status = kvs.TxAborted
+
+		kv.releaseLock(txID)
 	}
-	delete(lockState.readers, *txID)
+
 }
 
-func (kv *KVService) acquireLock(key string, lockState *LockState, txRecord TxRecord, mode string) {
+func (kv *KVService) acquireLock(key string, txID kvs.TXID, mode string) bool {
 
 	for {
 
+		txRecord, ok := kv.txTable[txID]
+		if !ok || txRecord.status == kvs.TxAborted {
+			fmt.Println("transaction ", txID, " waiting on ", key, "for ", mode, " was pre-empted")
+			kv.wakeNext(key)
+			return false
+		}
+
+		lockState := kv.lockTable[key]
+
 		// Try to acquire the S/X lock
-		if canAcquire(key, lockState, txRecord, mode) {
-			return
+		if canAcquire(lockState, txRecord, mode) {
+			if mode == "S" {
+				lockState.readers[txRecord.id] = struct{}{}
+			} else {
+				lockState.writer = txRecord.id
+			}
+			return true
 		}
 
 		// Remove transactions with a younger timestamp
-		if isOlder(txRecord.id, lockState.writer) {
-			markTransactionInactive(&lockState.writer, lockState, &kv.txTable)
+		if isOlder(txRecord.id, lockState.writer) && kv.txTable[lockState.writer].status != kvs.TxPrepared {
+			kv.woundTransaction(lockState.writer)
 		}
 		for reader, _ := range lockState.readers {
-			if isOlder(txRecord.id, reader) {
-				markTransactionInactive(&reader, lockState, &kv.txTable)
+			if isOlder(txRecord.id, reader) && kv.txTable[reader].status != kvs.TxPrepared {
+				kv.woundTransaction(reader)
 			}
 		}
 
 		// Try to acquire the S/X lock again
-		if canAcquire(key, lockState, txRecord, mode) {
-			return
+		if canAcquire(lockState, txRecord, mode) {
+			if mode == "S" {
+				lockState.readers[txRecord.id] = struct{}{}
+			} else {
+				lockState.writer = txRecord.id
+			}
+			return true
 		}
 
 		// Wait otherwise for a signal
-		w := Waiter{txID: txRecord.id, done: make(chan struct{})}
+		w := &Waiter{txID: txRecord.id, done: make(chan struct{})}
 		lockState.waitQueue.Enqueue(w)
 		// Release mutex
 
 		kv.mu.Unlock()
+		fmt.Println(txID, " sleeping")
 
 		<-w.done
 
 		// Acquire mutex
 		kv.mu.Lock()
+		fmt.Println(txID, " woken up")
 	}
 
 }
 
-// Wake the next waiting transaction (if any)
-func (kv *KVService) wakeNext(lockState *LockState) {
-	if lockState.waitQueue.Empty() {
+func (kv *KVService) wakeNext(key string) {
+	lockState := kv.lockTable[key]
+	for !lockState.waitQueue.Empty() {
+		wRaw, _ := lockState.waitQueue.Dequeue()
+		w := wRaw.(*Waiter)
+
+		if txRecord, ok := kv.txTable[w.txID]; !ok || txRecord.status == kvs.TxAborted {
+			// Transaction already aborted; wake the goroutine so it can see that.
+			close(w.done)
+			// And continue to look for the next valid waiter
+			continue
+		}
+
+		// Valid active transaction
+		close(w.done)
 		return
 	}
-
-	// Pop the highest-priority waiter (oldest TX)
-	wRaw, _ := lockState.waitQueue.Dequeue()
-	w := wRaw.(Waiter)
-
-	// Skip aborted transactions
-	if _, ok := kv.txTable[w.txID]; !ok {
-		// recursively wake next (this one is dead)
-		kv.wakeNext(lockState)
-		return
-	}
-
-	// Wake one waiter
-	close(w.done) // Unblocks the waiter in acquireLock()
 }
 
-func (kv *KVService) releaseLock(txRecord *TxRecord) {
+func (kv *KVService) releaseLock(txID kvs.TXID) {
+
+	txRecord := kv.txTable[txID]
 
 	for key := range txRecord.readSet {
 		lockState := kv.lockTable[key]
 		delete(lockState.readers, txRecord.id)
-		kv.wakeNext(lockState)
+		kv.wakeNext(key)
 	}
 
 	for key := range txRecord.writeSet {
 		lockState := kv.lockTable[key]
-		lockState.writer = kvs.TXID{}
-		kv.wakeNext(lockState)
+		if lockState.writer == txRecord.id {
+			lockState.writer = kvs.TXID{}
+		}
+		kv.wakeNext(key)
 	}
 }
 
@@ -227,7 +273,7 @@ func (kv *KVService) Begin(request *kvs.BeginRequest, response *kvs.BeginRespons
 			id:       request.TxID,
 			status:   kvs.TxOK,
 			writeSet: make(map[string]string),
-			readSet:  make(map[string]struct{}),
+			readSet:  make(map[string]string),
 		}
 
 		kv.txTable[request.TxID] = txRecord
@@ -242,37 +288,34 @@ func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) err
 
 	fmt.Println("Get", request)
 
-	// Check if the transaction record exists
-	txRecord, ok := kv.txTable[request.TxID]
-	if !ok {
-		return errors.New("TXN_NOT_FOUND")
+	// Check that the transaction has not been aborted
+	txRecord := kv.txTable[request.TxID]
+	if txRecord.status == kvs.TxAborted {
+		return errors.New(TXN_ABORTED)
 	}
 
 	// Check if the transaction has already written to this key (already holds the X-lock)
-	// fmt.Println(txRecord.writeSet)
+	// Read your own writes
+	// or if it has read the key before
 	if val, ok := txRecord.writeSet[request.Key]; ok {
+		response.Value = val
+		return nil
+	}
+	if val, ok := txRecord.readSet[request.Key]; ok {
 		response.Value = val
 		return nil
 	}
 
 	// Check if lockState for the key exists, if not create it
-	lockState := kv.createLockStateIfAbsent(request.Key)
+	kv.createLockStateIfAbsent(request.Key)
 
-	// Try to acquire S-lock. Deny only if another transaction holds it
-	kv.acquireLock(request.Key, lockState, *txRecord, "S")
-
-	// Acquired S-lock, update read set of the transaction
-	txRecord.readSet[request.Key] = struct{}{}
-
-	// Get value from map
-	if val, ok := kv.mp.Get(request.Key); ok {
+	// Try to acquire S-lock, update read set of the transaction
+	if kv.acquireLock(request.Key, request.TxID, "S") {
+		val, _ := kv.mp.Get(request.Key)
+		txRecord.readSet[request.Key] = val
 		response.Value = val
 	} else {
-		response.Value = ""
-	}
-
-	if _, ok := kv.txTable[request.TxID]; !ok {
-		return errors.New("transaction aborted")
+		return errors.New(TXN_ABORTED)
 	}
 
 	return nil
@@ -285,9 +328,9 @@ func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) err
 	fmt.Println("Put", request)
 
 	// Check if the transaction record exists
-	txRecord, ok := kv.txTable[request.TxID]
-	if !ok {
-		return errors.New("TXN_NOT_FOUND")
+	txRecord := kv.txTable[request.TxID]
+	if txRecord.status == kvs.TxAborted {
+		return errors.New(TXN_ABORTED)
 	}
 
 	// Check if the transaction has already written to this key (already holds the X-lock)
@@ -297,33 +340,46 @@ func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) err
 	}
 
 	// Check if lockState for the key exists, if not create it
-	lockState := kv.createLockStateIfAbsent(request.Key)
+	kv.createLockStateIfAbsent(request.Key)
 
-	// Try to acquire X-lock. Deny only if another transaction holds it
-	kv.acquireLock(request.Key, lockState, *txRecord, "X")
-
-	// Acquired X-lock, update write set of the transaction
-	txRecord.writeSet[request.Key] = request.Value
-
-	if _, ok := kv.txTable[request.TxID]; !ok {
-		return errors.New("transaction aborted")
+	// Try to acquire X-lock and update write set of the transaction
+	if kv.acquireLock(request.Key, request.TxID, "X") {
+		txRecord.writeSet[request.Key] = request.Value
+	} else {
+		return errors.New(TXN_ABORTED)
 	}
 
 	return nil
 
 }
 
+func (kv *KVService) Prepare(request *kvs.PrepareRequest, response *kvs.PrepareResponse) error {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+
+	fmt.Println("Prepare", request)
+
+	// Check if the transaction record exists
+	txRecord := kv.txTable[request.TxID]
+	if txRecord.status == kvs.TxAborted {
+		fmt.Println("Transaction preempted, prepare failed ", request.TxID)
+		response.Status = kvs.TxAborted
+		return errors.New(TXN_NOT_FOUND)
+	}
+
+	txRecord.status = kvs.TxPrepared
+	response.Status = kvs.TxOK
+
+	return nil
+}
+
 func (kv *KVService) Commit(request *kvs.CommitRequest, response *kvs.CommitResponse) error {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 
-	fmt.Println("Commit ", request)
+	fmt.Println("Commit", request)
 
-	// Check if the transaction record exists
-	txRecord, ok := kv.txTable[request.TxID]
-	if !ok {
-		return errors.New("TXN_NOT_FOUND")
-	}
+	txRecord := kv.txTable[request.TxID]
 
 	// Do writes
 	for key, val := range txRecord.writeSet {
@@ -331,7 +387,7 @@ func (kv *KVService) Commit(request *kvs.CommitRequest, response *kvs.CommitResp
 	}
 
 	// Release locks held by the transaction
-	kv.releaseLock(txRecord)
+	kv.releaseLock(txRecord.id)
 
 	// Remove transaction from table
 	delete(kv.txTable, request.TxID)
@@ -340,6 +396,8 @@ func (kv *KVService) Commit(request *kvs.CommitRequest, response *kvs.CommitResp
 		kv.stats.commits++
 	}
 
+	fmt.Println("Commiting request ", request)
+
 	return nil
 }
 
@@ -347,14 +405,13 @@ func (kv *KVService) Abort(request *kvs.AbortRequest, response *kvs.AbortRespons
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 
+	// fmt.Println("Abort ", request)
+
 	// Check if the transaction record exists
-	txRecord, ok := kv.txTable[request.TxID]
-	if !ok {
-		return nil
-	}
+	txRecord := kv.txTable[request.TxID]
 
 	// Release locks held by the transaction
-	kv.releaseLock(txRecord)
+	kv.releaseLock(txRecord.id)
 
 	// Remove transaction from table
 	delete(kv.txTable, request.TxID)
