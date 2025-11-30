@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/emirpasic/gods/queues/priorityqueue"
+	//"github.com/emirpasic/gods/queues/priorityqueue"
 	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/rstutsman/cs6450-labs/kvs"
 	"github.com/rstutsman/cs6450-labs/kvs/utils"
@@ -36,7 +36,7 @@ type TxRecord struct {
 type LockState struct {
 	readers   map[kvs.TXID]struct{} // S holders
 	writer    kvs.TXID              // X holder
-	waitQueue *priorityqueue.Queue  // Waiting transactions
+	waitQueue []Waiter //*priorityqueue.Queue  // Waiting transactions
 }
 
 type Stats struct {
@@ -59,6 +59,7 @@ type KVService struct {
 	stats     Stats
 	prevStats Stats
 	lastPrint time.Time
+	policy Policy
 }
 
 func NewKVService() *KVService {
@@ -71,6 +72,7 @@ func NewKVService() *KVService {
 }
 
 // Is a older than b?
+/*
 func isOlder(a kvs.TXID, b kvs.TXID) bool {
 	if a.Lo < b.Lo {
 		return true
@@ -78,12 +80,14 @@ func isOlder(a kvs.TXID, b kvs.TXID) bool {
 
 	return false
 }
+	*/
 
+// TODO: Rename to getKeyLockState instead
 func (kv *KVService) createLockStateIfAbsent(key string) *LockState {
 	if _, ok := kv.lockTable[key]; !ok {
 		lockState := &LockState{
 			readers:   make(map[kvs.TXID]struct{}),
-			waitQueue: priorityqueue.NewWith(utils.TXIDComparator),
+			waitQueue: make([]Waiter,0), //priorityqueue.NewWith(utils.TXIDComparator),
 		}
 		kv.lockTable[key] = lockState
 	}
@@ -92,6 +96,7 @@ func (kv *KVService) createLockStateIfAbsent(key string) *LockState {
 
 }
 
+// TODO: Rename to getTxnRecord instead
 func (kv *KVService) createTranRecordIfAbsent(txID kvs.TXID) *TxRecord {
 
 	if _, ok := kv.txTable[txID]; !ok {
@@ -107,7 +112,7 @@ func (kv *KVService) createTranRecordIfAbsent(txID kvs.TXID) *TxRecord {
 
 	return kv.txTable[txID]
 }
-
+/*
 func canAcquire(lockState *LockState, txID kvs.TXID, mode string) bool {
 
 	if mode == "S" {
@@ -139,7 +144,8 @@ func canAcquire(lockState *LockState, txID kvs.TXID, mode string) bool {
 
 	return true
 }
-
+*/
+/*
 func (kv *KVService) acquireLock(lockState *LockState, txID kvs.TXID, mode string) {
 
 	for {
@@ -186,7 +192,9 @@ func (kv *KVService) acquireLock(lockState *LockState, txID kvs.TXID, mode strin
 	}
 
 }
+*/
 
+/*
 func (kv *KVService) releaseLock(lockState *LockState, txID kvs.TXID) {
 
 	delete(lockState.readers, txID)
@@ -197,7 +205,7 @@ func (kv *KVService) releaseLock(lockState *LockState, txID kvs.TXID) {
 	// Ensure that atleast one transaction can progress
 
 }
-
+*/
 func (kv *KVService) begin(txID kvs.TXID) error {
 
 	txRecord := &TxRecord{
@@ -233,13 +241,17 @@ func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) err
 	// Check if lockState for the key exists, if not create it
 	lockState := kv.createLockStateIfAbsent(request.Key)
 
-	// Try to acquire S-lock. Deny only if another transaction holds it
-	if lockState.writer != (kvs.TXID{}) && lockState.writer != request.TxID {
-		return errors.New(LOCK_DENIED)
+	// TODO: Replace below code with wait-die logic. Call acquireLock.
+	// Try to acquire S-lock. Deny only if another transaction holds X-lock.
+
+	if err := kv.acquireLock(lockState, request.TxID, "S"); err != nil{
+		if errors.Is(err, ErrAbort){
+			return errors.New(LOCK_DENIED)
+		}
+		return err
 	}
 
 	// Update readers of the key and the read set of the transaction
-	lockState.readers[request.TxID] = struct{}{}
 	txRecord.readSet[request.Key] = struct{}{}
 
 	// Get value from map
@@ -270,21 +282,13 @@ func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) err
 	// Check if lockState for the key exists, if not create it
 	lockState := kv.createLockStateIfAbsent(request.Key)
 
-	// Try to acquire X-lock. Return LOCK_DENIED if failed
-	if lockState.writer != (kvs.TXID{}) {
-		if lockState.writer != request.TxID {
+	if err := kv.acquireLock(lockState, request.TxID, "X"); err != nil{
+		if errors.Is(err, ErrAbort){
 			return errors.New(LOCK_DENIED)
 		}
-	} else {
-		for key, _ := range lockState.readers {
-			if key != request.TxID {
-				return errors.New(LOCK_DENIED)
-			}
-		}
+		return err
 	}
 
-	// Can safely grant lock
-	lockState.writer = request.TxID
 	txRecord.writeSet[request.Key] = request.Value
 	return nil
 
@@ -308,11 +312,15 @@ func (kv *KVService) Commit(request *kvs.CommitRequest, response *kvs.CommitResp
 	}
 
 	// Remove TxID from LockState
-	for key, _ := range txRecord.writeSet {
-		kv.lockTable[key].writer = kvs.TXID{}
+	for key := range txRecord.writeSet {
+		if lockState, ok := kv.lockTable[key]; ok{
+			kv.releaseLock(lockState, request.TxID)
+		}
 	}
 	for key := range txRecord.readSet {
-		delete(kv.lockTable[key].readers, request.TxID)
+		if lockState, ok := kv.lockTable[key]; ok{
+			kv.releaseLock(lockState, request.TxID)
+		}
 	}
 
 	// Remove txID from record
@@ -338,11 +346,15 @@ func (kv *KVService) Abort(request *kvs.AbortRequest, response *kvs.AbortRespons
 	}
 
 	// Remove TxID from LockState
-	for key, _ := range txRecord.writeSet {
-		kv.lockTable[key].writer = kvs.TXID{}
+	for key := range txRecord.writeSet {
+		if lockState, ok := kv.lockTable[key]; ok{
+			kv.releaseLock(lockState, request.TxID)
+		}
 	}
 	for key := range txRecord.readSet {
-		delete(kv.lockTable[key].readers, request.TxID)
+		if lockState, ok := kv.lockTable[key]; ok{
+			kv.releaseLock(lockState, request.TxID)
+		}
 	}
 
 	// Remove txID from record
@@ -383,9 +395,12 @@ func main() {
 		log.Println(http.ListenAndServe("localhost:6060", nil))
 	}()
 	port := flag.String("port", "8080", "Port to run the server on")
+	policyFlag:= flag.String("policy","nowait","Lock policy: nowait|waitdie")
 	flag.Parse()
 
 	kvs := NewKVService()
+	kvs.policy= ParsePolicy(*policyFlag)
+
 	rpc.Register(kvs)
 	rpc.HandleHTTP()
 
@@ -403,7 +418,6 @@ func main() {
 		}
 	}()
 
-	pq.NewWith()
 
 	http.Serve(l, nil)
 }
