@@ -1,8 +1,6 @@
 package main
 
 import (
-	"crypto/rand"
-	"encoding/binary"
 	"errors"
 	"flag"
 	"fmt"
@@ -27,13 +25,9 @@ type Worker struct {
 
 func newTxID(clientID uint64) kvs.TXID {
 
-	var rnd uint64
-	binary.Read(rand.Reader, binary.BigEndian, &rnd)
-
 	return kvs.TXID{
-		ID: uint32(clientID),
-		Hi: uint64(time.Now().UnixNano()),
-		Lo: rnd,
+		Lo: uint64(time.Now().UnixNano()),
+		Hi: clientID,
 	}
 }
 
@@ -311,7 +305,6 @@ func serializabilityTest(id int, hosts HostList, done *atomic.Bool, numClients i
 				if err == nil {
 					initDone.Store(true)
 					checkBal = (checkBal + 1) % freq
-					fmt.Println("Initialized all accounts with 1000")
 				} else {
 					client.Abort()
 				}

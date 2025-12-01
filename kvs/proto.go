@@ -10,7 +10,6 @@ const (
 )
 
 type TXID struct {
-	ID uint32
 	Hi uint64
 	Lo uint64
 }

@@ -30,14 +30,6 @@ func TXIDComparator(a, b interface{}) int {
 	tx1 := a.(*Waiter)
 	tx2 := b.(*Waiter)
 
-	if tx1.txID.Hi < tx2.txID.Hi {
-		return -1
-	}
-
-	if tx1.txID.Hi > tx2.txID.Hi {
-		return 1
-	}
-
 	if tx1.txID.Lo < tx2.txID.Lo {
 		return -1
 	}
@@ -46,11 +38,11 @@ func TXIDComparator(a, b interface{}) int {
 		return 1
 	}
 
-	if tx1.txID.ID < tx2.txID.ID {
+	if tx1.txID.Hi < tx2.txID.Hi {
 		return -1
 	}
 
-	if tx1.txID.ID > tx2.txID.ID {
+	if tx1.txID.Hi > tx2.txID.Hi {
 		return 1
 	}
 
@@ -103,14 +95,11 @@ func NewKVService() *KVService {
 
 // Is a older than b?
 func isOlder(a kvs.TXID, b kvs.TXID) bool {
-	if a.Hi != b.Hi {
-		return a.Hi < b.Hi
-	}
 	if a.Lo != b.Lo {
 		return a.Lo < b.Lo
 	}
 
-	return a.ID < b.ID
+	return a.Hi < b.Hi
 }
 
 func (kv *KVService) createLockStateIfAbsent(key string) *LockState {
@@ -173,7 +162,6 @@ func (kv *KVService) acquireLock(key string, txID kvs.TXID, mode string) bool {
 
 		txRecord, ok := kv.txTable[txID]
 		if !ok || txRecord.status == kvs.TxAborted {
-			fmt.Println("transaction ", txID, " waiting on ", key, "for ", mode, " was pre-empted")
 			kv.wakeNext(key)
 			return false
 		}
@@ -216,13 +204,11 @@ func (kv *KVService) acquireLock(key string, txID kvs.TXID, mode string) bool {
 		// Release mutex
 
 		kv.mu.Unlock()
-		fmt.Println(txID, " sleeping")
 
 		<-w.done
 
 		// Acquire mutex
 		kv.mu.Lock()
-		fmt.Println(txID, " woken up")
 	}
 
 }
@@ -286,8 +272,6 @@ func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) err
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 
-	fmt.Println("Get", request)
-
 	// Check that the transaction has not been aborted
 	txRecord := kv.txTable[request.TxID]
 	if txRecord.status == kvs.TxAborted {
@@ -325,8 +309,6 @@ func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) err
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 
-	fmt.Println("Put", request)
-
 	// Check if the transaction record exists
 	txRecord := kv.txTable[request.TxID]
 	if txRecord.status == kvs.TxAborted {
@@ -357,12 +339,9 @@ func (kv *KVService) Prepare(request *kvs.PrepareRequest, response *kvs.PrepareR
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 
-	fmt.Println("Prepare", request)
-
 	// Check if the transaction record exists
 	txRecord := kv.txTable[request.TxID]
 	if txRecord.status == kvs.TxAborted {
-		fmt.Println("Transaction preempted, prepare failed ", request.TxID)
 		response.Status = kvs.TxAborted
 		return errors.New(TXN_NOT_FOUND)
 	}
@@ -376,8 +355,6 @@ func (kv *KVService) Prepare(request *kvs.PrepareRequest, response *kvs.PrepareR
 func (kv *KVService) Commit(request *kvs.CommitRequest, response *kvs.CommitResponse) error {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
-
-	fmt.Println("Commit", request)
 
 	txRecord := kv.txTable[request.TxID]
 
@@ -396,16 +373,12 @@ func (kv *KVService) Commit(request *kvs.CommitRequest, response *kvs.CommitResp
 		kv.stats.commits++
 	}
 
-	fmt.Println("Commiting request ", request)
-
 	return nil
 }
 
 func (kv *KVService) Abort(request *kvs.AbortRequest, response *kvs.AbortResponse) error {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
-
-	// fmt.Println("Abort ", request)
 
 	// Check if the transaction record exists
 	txRecord := kv.txTable[request.TxID]
