@@ -7,10 +7,13 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"net/rpc"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -211,6 +214,25 @@ func runClient(id int, hosts HostList, done *atomic.Bool, workload string, theta
 	// Initialize work queue
 	transactionQueue := make(chan *kvs.Transaction, 10000)
 
+	var attempts uint64 // total attempts (includes retries)
+	var commits uint64  // successful transactions
+	var aborts uint64   // aborted attempts
+
+	latencyCh := make(chan time.Duration, 100000)
+
+	// aggregator to collects latencies
+	var aggDone sync.WaitGroup
+	aggDone.Add(1)
+	var latencies []time.Duration
+	var sumNs int64
+	go func() {
+		defer aggDone.Done()
+		for d := range latencyCh {
+			latencies = append(latencies, d)
+			sumNs += d.Nanoseconds()
+		}
+	}()
+
 	// Initialize producer
 	wl := kvs.NewWorkload(workload, theta)
 	go func() {
@@ -222,8 +244,8 @@ func runClient(id int, hosts HostList, done *atomic.Bool, workload string, theta
 	// Initialize workers (pick up transaction from work queue, execute and abort if required)
 	NUM_OF_WORKERS := 10
 	for i := 0; i < NUM_OF_WORKERS; i++ {
-		go func() {
-			worker := Worker{rpcClients: rpcClients, workerID: uint64(i)}
+		go func(workerIndex int) {
+			worker := Worker{rpcClients: rpcClients, workerID: uint64(workerIndex)}
 
 			for !done.Load() {
 
@@ -232,6 +254,9 @@ func runClient(id int, hosts HostList, done *atomic.Bool, workload string, theta
 				txn.TxID = newTxID(worker.workerID)
 
 				txnDone := false
+
+				attemptStart := time.Now()
+				atomic.AddUint64(&attempts, 1)
 
 				// Execute transaction
 				for !txnDone {
@@ -252,20 +277,74 @@ func runClient(id int, hosts HostList, done *atomic.Bool, workload string, theta
 						}
 
 						if err != nil {
+							atomic.AddUint64(&aborts, 1)
 							worker.Abort()
 							break
 						}
 
 						if op.Type == kvs.OpCommit && err == nil {
 							txnDone = true
+							atomic.AddUint64(&commits, 1)
+							latency := time.Since(attemptStart)
+
+							fmt.Printf("client-%d latency_sample: %.6fms\n", worker.workerID, float64(latency.Nanoseconds())/1e6)
+
+							select {
+							case latencyCh <- latency:
+							default:
+							}
 						}
 
+					}
+					if !txnDone && !done.Load() {
+						// new attempt for same txn
+						attemptStart = time.Now()
+						atomic.AddUint64(&attempts, 1)
 					}
 				}
 
 			}
-		}()
+		}(i)
 
+	}
+	for !done.Load() {
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	close(latencyCh)
+	aggDone.Wait()
+
+	// compute and print stats
+	totalAttempts := atomic.LoadUint64(&attempts)
+	totalCommits := atomic.LoadUint64(&commits)
+	totalAborts := atomic.LoadUint64(&aborts)
+
+	count := len(latencies)
+	var avgMs, medianMs, p95Ms, p99Ms float64
+	if count > 0 {
+		sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
+		avgMs = float64(sumNs) / float64(count) / 1e6
+		medianMs = float64(latencies[count/2].Nanoseconds()) / 1e6
+		p95Idx := int(math.Ceil(0.95*float64(count))) - 1
+		if p95Idx < 0 {
+			p95Idx = 0
+		}
+		p95Ms = float64(latencies[p95Idx].Nanoseconds()) / 1e6
+		p99Idx := int(math.Ceil(0.99*float64(count))) - 1
+		if p99Idx < 0 {
+			p99Idx = 0
+		}
+		if p99Idx >= count {
+			p99Idx = count - 1
+		}
+		p99Ms = float64(latencies[p99Idx].Nanoseconds()) / 1e6
+	}
+
+	fmt.Printf("=== runClient stats ===\n")
+	fmt.Printf("attempts: %d, commits: %d, aborts: %d\n", totalAttempts, totalCommits, totalAborts)
+	fmt.Printf("latency samples: %d\n", count)
+	if count > 0 {
+		fmt.Printf("avg(ms): %.3f, median(ms): %.3f, p95(ms): %.3f, p99(ms): %.3f\n", avgMs, medianMs, p95Ms, p99Ms)
 	}
 
 }
