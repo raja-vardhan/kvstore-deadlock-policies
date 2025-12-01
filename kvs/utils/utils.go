@@ -5,8 +5,8 @@ import (
 )
 
 func TXIDComparator(a, b interface{}) int {
-	tx1 := a.(kvs.Waiter).TxID
-	tx2 := b.(kvs.Waiter).TxID
+	tx1 := a.(*kvs.Waiter).TxID
+	tx2 := b.(*kvs.Waiter).TxID
 
 	if tx1.Lo < tx2.Lo {
 		return 1
