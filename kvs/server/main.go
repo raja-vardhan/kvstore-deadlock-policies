@@ -126,7 +126,7 @@ func (kv *KVService) createLockStateIfAbsent(key string) *LockState {
 	return kv.lockTable[key]
 
 }
-
+/*
 func canAcquire(lockState *LockState, txRecord *TxRecord, mode string) bool {
 
 	if mode == "S" {
@@ -154,7 +154,8 @@ func canAcquire(lockState *LockState, txRecord *TxRecord, mode string) bool {
 		return true
 	}
 }
-
+*/
+/*
 func (kv *KVService) woundTransaction(txID kvs.TXID) {
 
 	if txRecord, ok := kv.txTable[txID]; !ok || txRecord.status == kvs.TxAborted {
@@ -227,7 +228,8 @@ func (kv *KVService) acquireLock(key string, txID kvs.TXID, mode string) bool {
 	}
 
 }
-
+*/
+/*
 func (kv *KVService) wakeNext(key string) {
 	lockState := kv.lockTable[key]
 	for !lockState.waitQueue.Empty() {
@@ -265,7 +267,7 @@ func (kv *KVService) releaseLock(txID kvs.TXID) {
 		kv.wakeNext(key)
 	}
 }
-
+*/
 func (kv *KVService) Begin(request *kvs.BeginRequest, response *kvs.BeginResponse) error {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
@@ -306,7 +308,19 @@ func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) err
 		response.Value = val
 		return nil
 	}
+	lockState := kv.createLockStateIfAbsent(request.Key)
 
+    if err := kv.acquireLock(lockState, request.TxID, "S"); err != nil{
+        if errors.Is(err, ErrAbort){
+            return errors.New(TXN_ABORTED)
+        }
+        return err
+    }
+
+    val, _ := kv.mp.Get(request.Key)
+    txRecord.readSet[request.Key] = val
+    response.Value=val
+	/*
 	// Check if lockState for the key exists, if not create it
 	kv.createLockStateIfAbsent(request.Key)
 
@@ -318,7 +332,7 @@ func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) err
 	} else {
 		return errors.New(TXN_ABORTED)
 	}
-
+*/
 	return nil
 }
 
@@ -340,6 +354,15 @@ func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) err
 		return nil
 	}
 
+	lockState := kv.createLockStateIfAbsent(request.Key)
+    if err := kv.acquireLock(lockState, request.TxID, "X"); err != nil{
+        if errors.Is(err, ErrAbort){
+            return errors.New(TXN_ABORTED)
+        }
+        return err
+    }
+    txRecord.writeSet[request.Key]=request.Value
+	/*
 	// Check if lockState for the key exists, if not create it
 	kv.createLockStateIfAbsent(request.Key)
 
@@ -349,7 +372,7 @@ func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) err
 	} else {
 		return errors.New(TXN_ABORTED)
 	}
-
+	*/
 	return nil
 
 }
@@ -382,6 +405,18 @@ func (kv *KVService) Commit(request *kvs.CommitRequest, response *kvs.CommitResp
 
 	txRecord := kv.txTable[request.TxID]
 
+	for key := range txRecord.readSet{
+        if lockState, ok := kv.lockTable[key]; ok{
+            kv.releaseLock(lockState, txRecord.id)
+        }
+    }
+    for key := range txRecord.writeSet{
+        if lockState, ok := kv.lockTable[key]; ok{
+            kv.releaseLock(lockState, txRecord.id)
+        }
+    }
+
+	/*
 	// Do writes
 	for key, val := range txRecord.writeSet {
 		kv.mp.Set(key, val)
@@ -389,7 +424,7 @@ func (kv *KVService) Commit(request *kvs.CommitRequest, response *kvs.CommitResp
 
 	// Release locks held by the transaction
 	kv.releaseLock(txRecord.id)
-
+	*/
 	// Remove transaction from table
 	delete(kv.txTable, request.TxID)
 
@@ -411,8 +446,19 @@ func (kv *KVService) Abort(request *kvs.AbortRequest, response *kvs.AbortRespons
 	// Check if the transaction record exists
 	txRecord := kv.txTable[request.TxID]
 
+	for key := range txRecord.readSet{
+        if lockState, ok := kv.lockTable[key]; ok{
+            kv.releaseLock(lockState, txRecord.id)
+        }
+    }
+    for key := range txRecord.writeSet{
+        if lockState, ok := kv.lockTable[key]; ok{
+            kv.releaseLock(lockState, txRecord.id)
+        }
+    }
+
 	// Release locks held by the transaction
-	kv.releaseLock(txRecord.id)
+	//kv.releaseLock(txRecord.id)
 
 	// Remove transaction from table
 	delete(kv.txTable, request.TxID)
