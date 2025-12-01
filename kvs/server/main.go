@@ -90,6 +90,7 @@ type KVService struct {
 	stats     Stats
 	prevStats Stats
 	lastPrint time.Time
+	policy Policy
 }
 
 func NewKVService() *KVService {
@@ -451,9 +452,11 @@ func main() {
 		log.Println(http.ListenAndServe("localhost:6060", nil))
 	}()
 	port := flag.String("port", "8080", "Port to run the server on")
+	policyFlag := flag.String("policy", "nowait", "Lock policy: nowait|waitdie")
 	flag.Parse()
 
 	kvs := NewKVService()
+	kvs.policy= ParsePolicy(*policyFlag)
 	rpc.Register(kvs)
 	rpc.HandleHTTP()
 
@@ -461,8 +464,9 @@ func main() {
 	if e != nil {
 		log.Fatal("listen error:", e)
 	}
+	//fmt.Printf("Starting KVS server on :%s\n", *port)
 
-	fmt.Printf("Starting KVS server on :%s\n", *port)
+	fmt.Printf("Starting KVS server on :%s (policy=%s)\n", *port, kvs.policy.String())
 
 	go func() {
 		for {

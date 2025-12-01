@@ -23,6 +23,7 @@ type Worker struct {
 	workerID   uint64        // globally unique per worker
 	txID       *kvs.TXID     // current transaction ID
 	txActive   bool          // is a transaction ongoing?
+	policy string			//'nowait' ,'waitdie', 'woundwait'
 }
 
 func newTxID(clientID uint64) kvs.TXID {
@@ -141,6 +142,7 @@ func (c *Worker) Commit() error {
 	}
 
 	// Prepare phase
+	/*
 	prepareArgs := &kvs.PrepareRequest{TxID: *c.txID}
 	prepareReply := &kvs.PrepareResponse{}
 
@@ -148,6 +150,19 @@ func (c *Worker) Commit() error {
 		err := c.rpcClients[idx].Call("KVService.Prepare", prepareArgs, prepareReply)
 		if err != nil || prepareReply.Status == kvs.TxAborted {
 			return fmt.Errorf("prepare failed")
+		}
+	}
+	*/
+
+	if c.policy == "woundwait"{
+		prepareArgs := &kvs.PrepareRequest{TxID: *c.txID}
+		prepareReply := &kvs.PrepareResponse{}
+
+		for idx := range len(serverAddrs){
+			err := c.rpcClients[idx].Call("KVService.Prepare", prepareArgs, prepareReply)
+			if err != nil || prepareReply.Status == kvs.TxAborted{
+				return fmt.Errorf("prepare failed")
+			}
 		}
 	}
 
@@ -201,7 +216,7 @@ func (c *Worker) Abort() error {
 
 //----------------workloads-----------
 
-func runClient(id int, hosts HostList, done *atomic.Bool, workload string, theta float64, opsPerTx int) {
+func runClient(id int, hosts HostList, done *atomic.Bool, workload string, theta float64, opsPerTx int, policy string) {
 
 	rpcClients := make([]*rpc.Client, len(hosts))
 	for i, host := range hosts {
@@ -223,7 +238,8 @@ func runClient(id int, hosts HostList, done *atomic.Bool, workload string, theta
 	NUM_OF_WORKERS := 10
 	for i := 0; i < NUM_OF_WORKERS; i++ {
 		go func() {
-			worker := Worker{rpcClients: rpcClients, workerID: uint64(i)}
+			//worker := Worker{rpcClients: rpcClients, workerID: uint64(i)}
+			worker := Worker{rpcClients: rpcClients, workerID: uint64(i), policy: policy}
 
 			for !done.Load() {
 
@@ -416,6 +432,7 @@ func main() {
 	workload := flag.String("workload", "YCSB-B", "Workload type (YCSB-A, YCSB-B, YCSB-C, xfer)")
 	secs := flag.Int("secs", 30, "Duration in seconds for each client to run")
 	opsPerTx := flag.Int("opsPerTx", 3, "Number of Get or Put operations per transaction")
+	policy := flag.String("policy", "nowait", "Lock policy: nowait|waitdie|woundwait")
 	// batchSize := flag.Int("batchSize", 8192, "Number of ops per batch before flush")
 	// batchTimeout := flag.Int("batchTimeout", 10, "Max time to wait before flushing a batch (in ms)")
 	// brokersPerHost := flag.Int("brokersPerHost", 8, "Number of brokers per server")
@@ -442,7 +459,7 @@ func main() {
 	if *workload != "xfer" {
 		clientId := os.Getpid() // TODO: Check if this is unique across different client processes. Original value was 0
 		go func(clientId int) {
-			runClient(clientId, hosts, &done, *workload, *theta, *opsPerTx)
+			runClient(clientId, hosts, &done, *workload, *theta, *opsPerTx, *policy)
 		}(clientId)
 	} else {
 		numClients := 10
