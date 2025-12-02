@@ -35,7 +35,7 @@ build-server: $(SERVER_BINARY) ## Build the KVS server binary
 
 build-client: $(CLIENT_BINARY) ## Build the KVS client binary
 
-$(SERVER_BINARY): $(BIN_DIR) $(wildcard kvs/server/*.go) $(wildcard kvs/*.go)
+$(SERVER_BINARY): $(BIN_DIR) $(wildcard kvs/server/$(SERVER_POLICY)/*.go) $(wildcard kvs/*.go)
 	@echo "Building KVS server..."
 	$(GOBUILD) $(BUILD_FLAGS) -o $(SERVER_BINARY) $(SERVER_PKG)
 

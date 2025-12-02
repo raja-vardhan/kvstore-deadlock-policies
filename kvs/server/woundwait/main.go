@@ -254,6 +254,7 @@ func (kv *KVService) releaseLock(txID kvs.TXID) {
 func (kv *KVService) Begin(request *kvs.BeginRequest, response *kvs.BeginResponse) error {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
+
 	if _, ok := kv.txTable[request.TxID]; !ok {
 		txRecord := &TxRecord{
 			id:       request.TxID,

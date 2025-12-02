@@ -16,6 +16,8 @@ import (
 	"github.com/rstutsman/cs6450-labs/kvs/utils"
 )
 
+var SERVER_POLICY kvs.Policy = kvs.NoWait
+
 type Worker struct {
 	rpcClients []*rpc.Client // RPC clients to all the servers
 	workerID   uint64        // globally unique per worker
@@ -134,15 +136,19 @@ func (c *Worker) Commit() error {
 		return fmt.Errorf("transaction not active")
 	}
 
-	// Prepare phase
-	prepareArgs := &kvs.PrepareRequest{TxID: *c.txID}
-	prepareReply := &kvs.PrepareResponse{}
+	if SERVER_POLICY == kvs.WoundWait {
 
-	for idx := range len(serverAddrs) {
-		err := c.rpcClients[idx].Call("KVService.Prepare", prepareArgs, prepareReply)
-		if err != nil || prepareReply.Status == kvs.TxAborted {
-			return fmt.Errorf("prepare failed")
+		// Prepare phase
+		prepareArgs := &kvs.PrepareRequest{TxID: *c.txID}
+		prepareReply := &kvs.PrepareResponse{}
+
+		for idx := range len(serverAddrs) {
+			err := c.rpcClients[idx].Call("KVService.Prepare", prepareArgs, prepareReply)
+			if err != nil || prepareReply.Status == kvs.TxAborted {
+				return fmt.Errorf("prepare failed")
+			}
 		}
+
 	}
 
 	// Commit phase
@@ -409,12 +415,15 @@ func main() {
 	workload := flag.String("workload", "YCSB-B", "Workload type (YCSB-A, YCSB-B, YCSB-C, xfer)")
 	secs := flag.Int("secs", 30, "Duration in seconds for each client to run")
 	opsPerTx := flag.Int("opsPerTx", 3, "Number of Get or Put operations per transaction")
+	flag.Var(&SERVER_POLICY, "policy", "One of: woundwait, waitdie, nowait")
 	// batchSize := flag.Int("batchSize", 8192, "Number of ops per batch before flush")
 	// batchTimeout := flag.Int("batchTimeout", 10, "Max time to wait before flushing a batch (in ms)")
 	// brokersPerHost := flag.Int("brokersPerHost", 8, "Number of brokers per server")
 	// generators := flag.Int("generators", 8, "Number of workload generator goroutines per client")
 	// channelBuffer := flag.Int("channelBuffer", 65536, "Size of the buffer for queuing ops by the broker")
 	flag.Parse()
+
+	fmt.Println(SERVER_POLICY)
 
 	serverAddrs = hosts // so pickServerAddr can use it
 

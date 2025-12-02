@@ -52,7 +52,7 @@ done
 echo "Building server mode: $SERVER_POLICY"
 
 # Check command line arguments
-if [ "$#" -gt 4 ]; then
+if [ "$#" -gt 5 ]; then
     echo "Error: Too many arguments"
     usage
 fi
@@ -169,7 +169,7 @@ echo "Initial cluster cleanup..."
 cleanup
 
 echo "Building the project..."
-make SERVER_POLICY="$SERVER_POLICY"
+make -B SERVER_POLICY="$SERVER_POLICY"
 echo
 
 # Start servers
@@ -197,7 +197,7 @@ for node in "${CLIENT_NODES[@]}"; do
     echo "Starting client on $node..."
     # Use a marker in the command line to make it easier to identify and wait for
     CLIENT_MARKER="kvsclient-run-$TS-$node"
-    ${SSH} $node "exec -a '$CLIENT_MARKER' ${ROOT}/bin/kvsclient -hosts $SERVER_HOSTS $CLIENT_ARGS > \"$LOG_DIR/kvsclient-$node.log\" 2>&1" &
+    ${SSH} $node "exec -a '$CLIENT_MARKER' ${ROOT}/bin/kvsclient -policy $SERVER_POLICY -hosts $SERVER_HOSTS $CLIENT_ARGS > \"$LOG_DIR/kvsclient-$node.log\" 2>&1" &
     CLIENT_PIDS+=($!)
 done
 

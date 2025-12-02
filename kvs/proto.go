@@ -1,5 +1,7 @@
 package kvs
 
+import "fmt"
+
 // ---------
 type TxStatus int
 
@@ -13,6 +15,33 @@ type TXID struct {
 	Hi uint64
 	Lo uint64
 }
+
+// -----------Deadlock policy---------------
+type Policy string
+
+const (
+	NoWait    Policy = "nowait"
+	WaitDie   Policy = "waitdie"
+	WoundWait Policy = "woundwait"
+)
+
+func (p *Policy) String() string { return string(*p) }
+
+func (p *Policy) Set(s string) error {
+	switch s {
+	case "woundwait":
+		*p = WoundWait
+	case "waitdie":
+		*p = WaitDie
+	case "nowait":
+		*p = NoWait
+	default:
+		return fmt.Errorf("invalid policy: %s", s)
+	}
+	return nil
+}
+
+// ---------------------------------------------
 
 // --------------Types of operations and transaction------------
 type OpType int
