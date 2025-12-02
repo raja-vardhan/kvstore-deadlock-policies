@@ -23,6 +23,8 @@ usage() {
     exit 1
 }
 
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Check for help options
 for arg in "$@"; do
     case "$arg" in
@@ -32,6 +34,23 @@ for arg in "$@"; do
     esac
 done
 
+SERVER_POLICY="woundwait"
+
+# Extract policy flag if present
+for arg in "$@"; do
+    case "$arg" in
+        --policy=*)
+            SERVER_POLICY="${arg#*=}"
+            ;;
+        --policy)
+            echo "Error: --policy requires an argument (nowait|waitdie|woundwait)"
+            exit 1
+            ;;
+    esac
+done
+
+echo "Building server mode: $SERVER_POLICY"
+
 # Check command line arguments
 if [ "$#" -gt 4 ]; then
     echo "Error: Too many arguments"
@@ -39,7 +58,6 @@ if [ "$#" -gt 4 ]; then
 fi
 
 # Configuration
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_ROOT="${ROOT}/logs"
 
 function cluster_size() {
@@ -151,7 +169,7 @@ echo "Initial cluster cleanup..."
 cleanup
 
 echo "Building the project..."
-make
+make SERVER_POLICY="$SERVER_POLICY"
 echo
 
 # Start servers
