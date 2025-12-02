@@ -5,10 +5,12 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"net/rpc"
-	"os"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -201,7 +203,7 @@ func (c *Worker) Abort() error {
 
 //----------------workloads-----------
 
-func runClient(id int, hosts HostList, done *atomic.Bool, workload string, theta float64, opsPerTx int) {
+func runClient(hosts HostList, done *atomic.Bool, workload string, theta float64, opsPerTx int, threads int) {
 
 	rpcClients := make([]*rpc.Client, len(hosts))
 	for i, host := range hosts {
@@ -211,27 +213,52 @@ func runClient(id int, hosts HostList, done *atomic.Bool, workload string, theta
 	// Initialize work queue
 	transactionQueue := make(chan *kvs.Transaction, 10000)
 
+	var attempts uint64 // total attempts (includes retries)
+	var commits uint64  // successful transactions
+	var aborts uint64   // aborted attempts
+
+	latencyCh := make(chan time.Duration, 100000)
+
+	// aggregator to collects latencies
+	var aggDone sync.WaitGroup
+	aggDone.Add(1)
+	var latencies []time.Duration
+	var sumNs int64
+	go func() {
+		defer aggDone.Done()
+		for d := range latencyCh {
+			latencies = append(latencies, d)
+			sumNs += d.Nanoseconds()
+		}
+	}()
+
 	// Initialize producer
 	wl := kvs.NewWorkload(workload, theta)
 	go func() {
 		for !done.Load() {
+			defer close(transactionQueue)
 			transactionQueue <- utils.GenerateRandomTransaction(wl, opsPerTx)
 		}
 	}()
 
 	// Initialize workers (pick up transaction from work queue, execute and abort if required)
-	NUM_OF_WORKERS := 10
-	for i := 0; i < NUM_OF_WORKERS; i++ {
-		go func() {
-			worker := Worker{rpcClients: rpcClients, workerID: uint64(i)}
+	for i := 0; i < threads; i++ {
+		go func(workerIndex int) {
+			worker := Worker{rpcClients: rpcClients, workerID: uint64(workerIndex)}
 
 			for !done.Load() {
 
-				txn := <-transactionQueue
+				txn, ok := <-transactionQueue
+				if !ok {
+					return
+				}
 
 				txn.TxID = newTxID(worker.workerID)
 
 				txnDone := false
+
+				attemptStart := time.Now()
+				atomic.AddUint64(&attempts, 1)
 
 				// Execute transaction
 				for !txnDone {
@@ -252,21 +279,79 @@ func runClient(id int, hosts HostList, done *atomic.Bool, workload string, theta
 						}
 
 						if err != nil {
+							atomic.AddUint64(&aborts, 1)
 							worker.Abort()
 							break
 						}
 
 						if op.Type == kvs.OpCommit && err == nil {
 							txnDone = true
+							atomic.AddUint64(&commits, 1)
+							latency := time.Since(attemptStart)
+
+							select {
+							case latencyCh <- latency:
+							default:
+							}
 						}
 
+					}
+					if !txnDone && !done.Load() {
+						// new attempt for same txn
+						attemptStart = time.Now()
+						atomic.AddUint64(&attempts, 1)
 					}
 				}
 
 			}
-		}()
+		}(i)
 
 	}
+
+	for !done.Load() {
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	close(latencyCh)
+	aggDone.Wait()
+
+	// compute and print stats
+	totalAttempts := atomic.LoadUint64(&attempts)
+	totalCommits := atomic.LoadUint64(&commits)
+	totalAborts := atomic.LoadUint64(&aborts)
+
+	count := len(latencies)
+	var avgMs, medianMs, p95Ms, p99Ms float64
+	if count > 0 {
+		sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
+		avgMs = float64(sumNs) / float64(count) / 1e6
+		medianMs = float64(latencies[count/2].Nanoseconds()) / 1e6
+		p95Idx := int(math.Ceil(0.95*float64(count))) - 1
+		if p95Idx < 0 {
+			p95Idx = 0
+		}
+		p95Ms = float64(latencies[p95Idx].Nanoseconds()) / 1e6
+		p99Idx := int(math.Ceil(0.99*float64(count))) - 1
+		if p99Idx < 0 {
+			p99Idx = 0
+		}
+		if p99Idx >= count {
+			p99Idx = count - 1
+		}
+		p99Ms = float64(latencies[p99Idx].Nanoseconds()) / 1e6
+	}
+
+	fmt.Printf("=== runClient stats ===\n")
+	fmt.Printf("attempts: %d, commits: %d, aborts: %d\n", totalAttempts, totalCommits, totalAborts)
+	fmt.Printf("latency samples: %d\n", count)
+	if count > 0 {
+		fmt.Printf("avg(ms): %.3f, median(ms): %.3f, p95(ms): %.3f, p99(ms): %.3f\n", avgMs, medianMs, p95Ms, p99Ms)
+	}
+
+	fmt.Printf(
+		"CLIENT-SUMMARY: attempts=%d commits=%d aborts=%d samples=%d avg_ms=%.3f median_ms=%.3f p95_ms=%.3f p99_ms=%.3f\n",
+		totalAttempts, totalCommits, totalAborts, count, avgMs, medianMs, p95Ms, p99Ms,
+	)
 
 }
 
@@ -416,11 +501,8 @@ func main() {
 	secs := flag.Int("secs", 30, "Duration in seconds for each client to run")
 	opsPerTx := flag.Int("opsPerTx", 3, "Number of Get or Put operations per transaction")
 	flag.Var(&SERVER_POLICY, "policy", "One of: woundwait, waitdie, nowait")
-	// batchSize := flag.Int("batchSize", 8192, "Number of ops per batch before flush")
-	// batchTimeout := flag.Int("batchTimeout", 10, "Max time to wait before flushing a batch (in ms)")
-	// brokersPerHost := flag.Int("brokersPerHost", 8, "Number of brokers per server")
-	// generators := flag.Int("generators", 8, "Number of workload generator goroutines per client")
-	// channelBuffer := flag.Int("channelBuffer", 65536, "Size of the buffer for queuing ops by the broker")
+	threads := flag.Int("threads", 10, "Number of client threads per process (not for xfer)")
+
 	flag.Parse()
 
 	fmt.Println(SERVER_POLICY)
@@ -439,13 +521,16 @@ func main() {
 		hosts, *theta, *workload, *secs,
 	)
 
-	done := atomic.Bool{}
+	var done atomic.Bool
+	done.Store(false)
+
+	go func() {
+		time.Sleep(time.Duration(*secs) * time.Second)
+		done.Store(true)
+	}()
 
 	if *workload != "xfer" {
-		clientId := os.Getpid() // TODO: Check if this is unique across different client processes. Original value was 0
-		go func(clientId int) {
-			runClient(clientId, hosts, &done, *workload, *theta, *opsPerTx)
-		}(clientId)
+		runClient(hosts, &done, *workload, *theta, *opsPerTx, *threads)
 	} else {
 		numClients := 10
 		initDone := atomic.Bool{}
@@ -456,6 +541,8 @@ func main() {
 		}
 	}
 
-	time.Sleep(time.Duration(*secs) * time.Second)
-	done.Store(true)
+	for !done.Load() {
+		time.Sleep(100 * time.Millisecond)
+	}
+
 }
