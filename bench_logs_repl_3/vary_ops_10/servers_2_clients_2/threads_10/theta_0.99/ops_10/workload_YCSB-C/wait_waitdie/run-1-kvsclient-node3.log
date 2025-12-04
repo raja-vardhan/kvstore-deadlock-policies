@@ -1,0 +1,13 @@
+waitdie
+hosts [node0:8080 node1:8080]
+theta 0.99
+workload YCSB-C
+secs 30
+opsPerTx 10
+policy waitdie
+threads 5
+=== runClient stats ===
+attempts: 41940, commits: 41940, aborts: 0
+latency samples: 41940
+avg(ms): 3.553, median(ms): 3.502, p95(ms): 4.135, p99(ms): 4.884
+CLIENT-SUMMARY: attempts=41940 commits=41940 aborts=0 samples=41940 avg_ms=3.553 median_ms=3.502 p95_ms=4.135 p99_ms=4.884
