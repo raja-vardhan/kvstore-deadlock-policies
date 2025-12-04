@@ -58,7 +58,7 @@ if [ "$#" -gt 5 ]; then
 fi
 
 # Configuration
-LOG_ROOT="${ROOT}/repl_logs"
+LOG_ROOT="${ROOT}/logs"
 
 function cluster_size() {
     /usr/local/etc/emulab/tmcc hostnames | wc -l

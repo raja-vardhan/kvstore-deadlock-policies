@@ -420,6 +420,7 @@ func (kv *KVService) printStats() {
 }
 
 func main() {
+	fmt.Println("waitdie")
 	go func() {
 		log.Println(http.ListenAndServe("localhost:6060", nil))
 	}()

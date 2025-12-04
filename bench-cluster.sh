@@ -2,15 +2,15 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_ROOT="${ROOT}/bench_logs_repl_2"
+LOG_ROOT="${ROOT}/bench_logs_repl_3"
 
 # rm -rf $LOG_ROOT
 
 #######################################################################
 # GROUP A — Main Looping Parameters
 #######################################################################
-WORKLOADS=("YCSB-C")
-WAIT_POLICIES=("woundwait")
+WORKLOADS=("YCSB-A" "YCSB-B" "YCSB-C")
+WAIT_POLICIES=("woundwait" "waitdie" "nowait")
 REPEATS=3
 
 #######################################################################
@@ -25,9 +25,9 @@ BASE_OPS=3
 
 ### Parameters to vary independently
 SERVERS_LIST=(1 2 3)
-THREADS_LIST=(20)
+THREADS_LIST=(10 20 30)
 THETA_LIST=(0 0.2 0.4 0.6 0.8 0.99)
-OPS_LIST=(3 20)
+OPS_LIST=(10 20 30)
 #######################################################################
 
 SSH_OPTS="-o StrictHostKeyChecking=no"
@@ -121,7 +121,7 @@ run_experiment_group() {
         # Per-client args
         declare -a client_args
         for ((c=0; c<clients; c++)); do
-            client_args[$c]="--threads ${CLIENT_THREADS[$c]} --workload $workload --theta $theta --opsPerTx $ops"
+            client_args[$c]="-threads ${CLIENT_THREADS[$c]} -workload $workload -theta $theta -opsPerTx $ops -policy $wait_policy"
         done
 
         # Start servers
@@ -155,24 +155,24 @@ run_experiment_group() {
 
 cleanup
 
-# ### 1. Vary servers
-# for val in "${SERVERS_LIST[@]}"; do
-#     run_experiment_group "vary_servers_$val" "$val" "$BASE_THREADS" "$BASE_THETA" "$BASE_OPS"
-# done
-
-### 2. Vary total threads
-for val in "${THREADS_LIST[@]}"; do
-    run_experiment_group "vary_threads_$val" "$BASE_SERVERS" "$val" "$BASE_THETA" "$BASE_OPS"
+### 1. Vary servers
+for val in "${SERVERS_LIST[@]}"; do
+    run_experiment_group "vary_servers_$val" "$val" "$BASE_THREADS" "$BASE_THETA" "$BASE_OPS"
 done
 
-# ### 3. Vary theta
-# for val in "${THETA_LIST[@]}"; do
-#     run_experiment_group "vary_theta_$val" "$BASE_SERVERS" "$BASE_THREADS" "$val" "$BASE_OPS"
+# ### 2. Vary total threads
+# for val in "${THREADS_LIST[@]}"; do
+#     run_experiment_group "vary_threads_$val" "$BASE_SERVERS" "$val" "$BASE_THETA" "$BASE_OPS"
 # done
 
-# ### 4. Vary opsPerTx
-# for val in "${OPS_LIST[@]}"; do
-#     run_experiment_group "vary_ops_$val" "$BASE_SERVERS" "$BASE_THREADS" "$BASE_THETA" "$val"
-# done
+### 3. Vary theta
+for val in "${THETA_LIST[@]}"; do
+    run_experiment_group "vary_theta_$val" "$BASE_SERVERS" "$BASE_THREADS" "$val" "$BASE_OPS"
+done
+
+### 4. Vary opsPerTx
+for val in "${OPS_LIST[@]}"; do
+    run_experiment_group "vary_ops_$val" "$BASE_SERVERS" "$BASE_THREADS" "$BASE_THETA" "$val"
+done
 
 echo "All experiment groups completed."

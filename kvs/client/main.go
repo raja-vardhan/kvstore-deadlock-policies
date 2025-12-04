@@ -515,10 +515,13 @@ func main() {
 
 	fmt.Printf(
 		"hosts %v\n"+
-			"theta %.2f\n"+
-			"workload %s\n"+
-			"secs %d\n",
-		hosts, *theta, *workload, *secs,
+		"theta %.2f\n"+
+		"workload %s\n"+
+		"secs %d\n"+
+		"opsPerTx %d\n"+
+		"policy %s\n"+
+		"threads %d\n",
+		hosts, *theta, *workload, *secs, *opsPerTx, SERVER_POLICY, *threads,
 	)
 
 	var done atomic.Bool

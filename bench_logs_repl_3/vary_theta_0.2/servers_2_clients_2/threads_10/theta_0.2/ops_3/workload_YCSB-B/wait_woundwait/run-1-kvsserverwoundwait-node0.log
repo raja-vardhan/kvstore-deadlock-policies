@@ -1,0 +1,124 @@
+woundwait
+Starting KVS server on :8080
+commits/s 0.00
+aborts/s 0.00
+ops/s 0.00
+
+commits/s 0.00
+aborts/s 0.00
+ops/s 0.00
+
+commits/s 0.00
+aborts/s 0.00
+ops/s 0.00
+
+commits/s 0.00
+aborts/s 0.00
+ops/s 0.00
+
+commits/s 516.95
+aborts/s 0.00
+ops/s 516.95
+
+commits/s 4300.80
+aborts/s 0.00
+ops/s 4300.80
+
+commits/s 4235.97
+aborts/s 0.00
+ops/s 4235.97
+
+commits/s 4244.30
+aborts/s 0.00
+ops/s 4244.30
+
+commits/s 4308.39
+aborts/s 0.00
+ops/s 4308.39
+
+commits/s 4215.34
+aborts/s 0.00
+ops/s 4215.34
+
+commits/s 4255.36
+aborts/s 0.00
+ops/s 4255.36
+
+commits/s 4298.39
+aborts/s 0.00
+ops/s 4298.39
+
+commits/s 4376.34
+aborts/s 0.00
+ops/s 4376.34
+
+commits/s 4279.69
+aborts/s 0.00
+ops/s 4279.69
+
+commits/s 4139.57
+aborts/s 0.00
+ops/s 4139.57
+
+commits/s 4322.58
+aborts/s 0.00
+ops/s 4322.58
+
+commits/s 4255.53
+aborts/s 0.00
+ops/s 4255.53
+
+commits/s 4256.73
+aborts/s 0.00
+ops/s 4256.73
+
+commits/s 4275.36
+aborts/s 0.00
+ops/s 4275.36
+
+commits/s 4339.44
+aborts/s 0.00
+ops/s 4339.44
+
+commits/s 4308.32
+aborts/s 0.00
+ops/s 4308.32
+
+commits/s 4282.95
+aborts/s 0.00
+ops/s 4282.95
+
+commits/s 4227.56
+aborts/s 0.00
+ops/s 4227.56
+
+commits/s 4284.66
+aborts/s 0.00
+ops/s 4284.66
+
+commits/s 4224.63
+aborts/s 0.00
+ops/s 4224.63
+
+commits/s 4058.98
+aborts/s 0.00
+ops/s 4058.98
+
+commits/s 4227.69
+aborts/s 0.00
+ops/s 4227.69
+
+panic: runtime error: invalid memory address or nil pointer dereference
+[signal SIGSEGV: segmentation violation code=0x1 addr=0x10 pc=0x7b381c]
+
+goroutine 432654 [running]:
+main.(*KVService).Prepare(0x0?, 0xc00535c160?, 0xc00535c158)
+	/mnt/nfs/sid-dev-wait-die/cs6450-labs/kvs/server/woundwait/main.go:345 +0x9c
+reflect.Value.call({0xc000114c60?, 0xc000122248?, 0x13?}, {0x8f1688, 0x4}, {0xc004258ef8, 0x3, 0x3?})
+	/usr/local/go/src/reflect/value.go:581 +0xcc6
+reflect.Value.Call({0xc000114c60?, 0xc000122248?, 0x0?}, {0xc0002ddef8?, 0x0?, 0x0?})
+	/usr/local/go/src/reflect/value.go:365 +0xb9
+net/rpc.(*service).call(0xc0001131c0, 0xccb060, 0xc0000121d0, 0xc0000121e0, 0xc000178480, 0xc000090480, {0x844080?, 0xc00535c160?, 0x0?}, {0x8440c0, ...}, ...)
+	/usr/local/go/src/net/rpc/server.go:383 +0x209
+created by net/rpc.(*Server).ServeCodec in goroutine 5
+	/usr/local/go/src/net/rpc/server.go:480 +0x3de
