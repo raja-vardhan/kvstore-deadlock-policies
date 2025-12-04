@@ -16,131 +16,131 @@ commits/s 0.00
 aborts/s 0.00
 ops/s 0.00
 
+commits/s 9.00
+aborts/s 128.98
+ops/s 137.98
+
+commits/s 170.99
+aborts/s 3681.74
+ops/s 3852.72
+
+commits/s 154.98
+aborts/s 3729.48
+ops/s 3884.46
+
+commits/s 151.98
+aborts/s 3624.46
+ops/s 3776.44
+
+commits/s 145.98
+aborts/s 3582.39
+ops/s 3728.37
+
+commits/s 141.97
+aborts/s 3456.23
+ops/s 3598.20
+
+commits/s 95.99
+aborts/s 3709.49
+ops/s 3805.48
+
+commits/s 119.98
+aborts/s 3874.50
+ops/s 3994.49
+
+commits/s 162.98
+aborts/s 3497.52
+ops/s 3660.50
+
+commits/s 166.97
+aborts/s 3638.31
+ops/s 3805.28
+
+commits/s 150.98
+aborts/s 3468.48
+ops/s 3619.46
+
+commits/s 145.97
+aborts/s 3701.36
+ops/s 3847.33
+
+commits/s 105.99
+aborts/s 3680.63
+ops/s 3786.62
+
+commits/s 173.98
+aborts/s 3412.55
+ops/s 3586.52
+
+commits/s 141.98
+aborts/s 3857.46
+ops/s 3999.44
+
+commits/s 116.97
+aborts/s 4011.92
+ops/s 4128.89
+
+commits/s 163.98
+aborts/s 3630.53
+ops/s 3794.51
+
+commits/s 139.98
+aborts/s 3702.45
+ops/s 3842.43
+
+commits/s 147.98
+aborts/s 4054.57
+ops/s 4202.56
+
+commits/s 163.98
+aborts/s 4003.53
+ops/s 4167.52
+
+commits/s 165.98
+aborts/s 3584.65
+ops/s 3750.63
+
+commits/s 134.95
+aborts/s 3428.81
+ops/s 3563.76
+
+commits/s 163.98
+aborts/s 3493.56
+ops/s 3657.54
+
+commits/s 156.98
+aborts/s 3835.45
+ops/s 3992.43
+
+commits/s 149.98
+aborts/s 3584.62
+ops/s 3734.61
+
+commits/s 153.98
+aborts/s 3638.57
+ops/s 3792.55
+
+commits/s 117.99
+aborts/s 3933.61
+ops/s 4051.60
+
+commits/s 151.98
+aborts/s 3805.57
+ops/s 3957.56
+
+commits/s 131.98
+aborts/s 3722.43
+ops/s 3854.41
+
+commits/s 145.98
+aborts/s 3701.57
+ops/s 3847.56
+
+commits/s 114.94
+aborts/s 3050.29
+ops/s 3165.23
+
 commits/s 0.00
 aborts/s 0.00
 ops/s 0.00
-
-commits/s 173.99
-aborts/s 3205.82
-ops/s 3379.82
-
-commits/s 157.97
-aborts/s 3524.26
-ops/s 3682.23
-
-commits/s 153.98
-aborts/s 3362.56
-ops/s 3516.54
-
-commits/s 147.98
-aborts/s 3694.51
-ops/s 3842.49
-
-commits/s 139.99
-aborts/s 3601.65
-ops/s 3741.63
-
-commits/s 134.98
-aborts/s 3819.50
-ops/s 3954.48
-
-commits/s 154.96
-aborts/s 3564.97
-ops/s 3719.93
-
-commits/s 150.98
-aborts/s 3661.62
-ops/s 3812.61
-
-commits/s 143.98
-aborts/s 3828.38
-ops/s 3972.35
-
-commits/s 133.98
-aborts/s 3782.47
-ops/s 3916.45
-
-commits/s 164.98
-aborts/s 3483.60
-ops/s 3648.58
-
-commits/s 173.98
-aborts/s 3835.49
-ops/s 4009.46
-
-commits/s 148.97
-aborts/s 3891.18
-ops/s 4040.15
-
-commits/s 134.96
-aborts/s 4045.95
-ops/s 4180.91
-
-commits/s 149.96
-aborts/s 3645.08
-ops/s 3795.04
-
-commits/s 192.97
-aborts/s 3453.49
-ops/s 3646.46
-
-commits/s 187.98
-aborts/s 3588.53
-ops/s 3776.51
-
-commits/s 156.98
-aborts/s 3761.53
-ops/s 3918.51
-
-commits/s 128.98
-aborts/s 3391.46
-ops/s 3520.44
-
-commits/s 182.97
-aborts/s 3435.47
-ops/s 3618.44
-
-commits/s 174.97
-aborts/s 3442.35
-ops/s 3617.31
-
-commits/s 162.98
-aborts/s 3779.56
-ops/s 3942.54
-
-commits/s 164.97
-aborts/s 3679.30
-ops/s 3844.27
-
-commits/s 176.98
-aborts/s 3552.61
-ops/s 3729.59
-
-commits/s 152.98
-aborts/s 3604.63
-ops/s 3757.61
-
-commits/s 188.98
-aborts/s 3454.66
-ops/s 3643.64
-
-commits/s 148.95
-aborts/s 3557.89
-ops/s 3706.84
-
-commits/s 178.98
-aborts/s 3728.53
-ops/s 3907.51
-
-commits/s 147.98
-aborts/s 3815.44
-ops/s 3963.42
-
-commits/s 165.97
-aborts/s 3465.36
-ops/s 3631.33
-
-commits/s 4.00
-aborts/s 53.94
-ops/s 57.93
 

@@ -7,7 +7,7 @@ opsPerTx 20
 policy waitdie
 threads 5
 === runClient stats ===
-attempts: 34003, commits: 13653, aborts: 20359
-latency samples: 13653
-avg(ms): 6.620, median(ms): 6.201, p95(ms): 9.816, p99(ms): 12.668
-CLIENT-SUMMARY: attempts=34003 commits=13653 aborts=20359 samples=13653 avg_ms=6.620 median_ms=6.201 p95_ms=9.816 p99_ms=12.668
+attempts: 34653, commits: 13127, aborts: 21531
+latency samples: 13127
+avg(ms): 6.659, median(ms): 6.219, p95(ms): 9.904, p99(ms): 12.945
+CLIENT-SUMMARY: attempts=34653 commits=13127 aborts=21531 samples=13127 avg_ms=6.659 median_ms=6.219 p95_ms=9.904 p99_ms=12.945

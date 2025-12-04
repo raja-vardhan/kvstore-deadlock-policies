@@ -16,77 +16,131 @@ commits/s 0.00
 aborts/s 0.00
 ops/s 0.00
 
-commits/s 39.00
+commits/s 849.93
 aborts/s 0.00
-ops/s 39.00
+ops/s 849.93
 
-commits/s 4365.51
+commits/s 4268.41
 aborts/s 0.00
-ops/s 4365.51
+ops/s 4268.41
 
-commits/s 4221.45
+commits/s 4202.29
 aborts/s 0.00
-ops/s 4221.45
+ops/s 4202.29
 
-commits/s 4220.52
+commits/s 4332.43
 aborts/s 0.00
-ops/s 4220.52
+ops/s 4332.43
 
-commits/s 4232.38
+commits/s 4262.13
 aborts/s 0.00
-ops/s 4232.38
+ops/s 4262.13
 
-commits/s 4170.91
+commits/s 4189.57
 aborts/s 0.00
-ops/s 4170.91
+ops/s 4189.57
 
-commits/s 4245.44
+commits/s 4229.43
 aborts/s 0.00
-ops/s 4245.44
+ops/s 4229.43
 
-commits/s 4245.27
+commits/s 4331.92
 aborts/s 0.00
-ops/s 4245.27
+ops/s 4331.92
 
-commits/s 4279.44
+commits/s 4326.05
 aborts/s 0.00
-ops/s 4279.44
+ops/s 4326.05
 
-commits/s 4184.55
+commits/s 4186.52
 aborts/s 0.00
-ops/s 4184.55
+ops/s 4186.52
 
-commits/s 4030.29
+commits/s 4060.47
 aborts/s 0.00
-ops/s 4030.29
+ops/s 4060.47
 
-commits/s 4229.35
+commits/s 4348.43
 aborts/s 0.00
-ops/s 4229.35
+ops/s 4348.43
 
-commits/s 4264.61
+commits/s 4200.24
 aborts/s 0.00
-ops/s 4264.61
+ops/s 4200.24
 
-commits/s 4258.43
+commits/s 4335.44
 aborts/s 0.00
-ops/s 4258.43
+ops/s 4335.44
 
-commits/s 4289.64
+commits/s 4276.66
 aborts/s 0.00
-ops/s 4289.64
+ops/s 4276.66
 
-panic: runtime error: invalid memory address or nil pointer dereference
-[signal SIGSEGV: segmentation violation code=0x1 addr=0x18 pc=0x7b3a57]
+commits/s 4228.60
+aborts/s 0.00
+ops/s 4228.60
 
-goroutine 274534 [running]:
-main.(*KVService).Commit(0xc000172700, 0xc003846d08, 0x0?)
-	/mnt/nfs/sid-dev-wait-die/cs6450-labs/kvs/server/woundwait/main.go:363 +0xb7
-reflect.Value.call({0xc000116ba0?, 0xc000124218?, 0x13?}, {0x8f1688, 0x4}, {0xc003267ef8, 0x3, 0x3?})
-	/usr/local/go/src/reflect/value.go:581 +0xcc6
-reflect.Value.Call({0xc000116ba0?, 0xc000124218?, 0xc0000f5280?}, {0xc0007e6ef8?, 0xc0007a3e18?, 0x6?})
-	/usr/local/go/src/reflect/value.go:365 +0xb9
-net/rpc.(*service).call(0xc0001151c0, 0xccb060, 0xc0001222d0, 0xc0001222e0, 0xc000178380, 0xc00020e160, {0x844100?, 0xc003846d08?, 0xc0018a0a00?}, {0x844140, ...}, ...)
-	/usr/local/go/src/net/rpc/server.go:383 +0x209
-created by net/rpc.(*Server).ServeCodec in goroutine 25
-	/usr/local/go/src/net/rpc/server.go:480 +0x3de
+commits/s 4384.13
+aborts/s 0.00
+ops/s 4384.13
+
+commits/s 4233.55
+aborts/s 0.00
+ops/s 4233.55
+
+commits/s 4239.99
+aborts/s 0.00
+ops/s 4239.99
+
+commits/s 4241.38
+aborts/s 0.00
+ops/s 4241.38
+
+commits/s 4022.50
+aborts/s 0.00
+ops/s 4022.50
+
+commits/s 4060.60
+aborts/s 0.00
+ops/s 4060.60
+
+commits/s 4210.14
+aborts/s 0.00
+ops/s 4210.14
+
+commits/s 4234.43
+aborts/s 0.00
+ops/s 4234.43
+
+commits/s 4192.59
+aborts/s 0.00
+ops/s 4192.59
+
+commits/s 4246.71
+aborts/s 0.00
+ops/s 4246.71
+
+commits/s 4279.50
+aborts/s 0.00
+ops/s 4279.50
+
+commits/s 4250.56
+aborts/s 0.00
+ops/s 4250.56
+
+commits/s 4240.16
+aborts/s 0.00
+ops/s 4240.16
+
+commits/s 4206.56
+aborts/s 0.00
+ops/s 4206.56
+
+commits/s 2928.12
+aborts/s 0.00
+ops/s 2928.12
+
+commits/s 0.00
+aborts/s 0.00
+ops/s 0.00
+

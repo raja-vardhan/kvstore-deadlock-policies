@@ -160,10 +160,10 @@ for val in "${SERVERS_LIST[@]}"; do
     run_experiment_group "vary_servers_$val" "$val" "$BASE_THREADS" "$BASE_THETA" "$BASE_OPS"
 done
 
-# ### 2. Vary total threads
-# for val in "${THREADS_LIST[@]}"; do
-#     run_experiment_group "vary_threads_$val" "$BASE_SERVERS" "$val" "$BASE_THETA" "$BASE_OPS"
-# done
+### 2. Vary total threads
+for val in "${THREADS_LIST[@]}"; do
+    run_experiment_group "vary_threads_$val" "$BASE_SERVERS" "$val" "$BASE_THETA" "$BASE_OPS"
+done
 
 ### 3. Vary theta
 for val in "${THETA_LIST[@]}"; do

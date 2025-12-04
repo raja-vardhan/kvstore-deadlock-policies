@@ -16,109 +16,131 @@ commits/s 0.00
 aborts/s 0.00
 ops/s 0.00
 
-commits/s 516.95
+commits/s 582.72
 aborts/s 0.00
-ops/s 516.95
+ops/s 582.72
 
-commits/s 4300.80
+commits/s 4293.66
 aborts/s 0.00
-ops/s 4300.80
+ops/s 4293.66
 
-commits/s 4235.97
+commits/s 4275.82
 aborts/s 0.00
-ops/s 4235.97
+ops/s 4275.82
 
-commits/s 4244.30
+commits/s 4245.47
 aborts/s 0.00
-ops/s 4244.30
+ops/s 4245.47
 
-commits/s 4308.39
+commits/s 4276.08
 aborts/s 0.00
-ops/s 4308.39
+ops/s 4276.08
 
-commits/s 4215.34
+commits/s 4126.24
 aborts/s 0.00
-ops/s 4215.34
+ops/s 4126.24
 
-commits/s 4255.36
+commits/s 4246.85
 aborts/s 0.00
-ops/s 4255.36
+ops/s 4246.85
 
-commits/s 4298.39
+commits/s 4396.76
 aborts/s 0.00
-ops/s 4298.39
+ops/s 4396.76
 
-commits/s 4376.34
+commits/s 4321.95
 aborts/s 0.00
-ops/s 4376.34
+ops/s 4321.95
 
-commits/s 4279.69
+commits/s 4261.36
 aborts/s 0.00
-ops/s 4279.69
+ops/s 4261.36
 
-commits/s 4139.57
+commits/s 4231.34
 aborts/s 0.00
-ops/s 4139.57
+ops/s 4231.34
 
-commits/s 4322.58
+commits/s 4243.71
 aborts/s 0.00
-ops/s 4322.58
+ops/s 4243.71
 
-commits/s 4255.53
+commits/s 4393.44
 aborts/s 0.00
-ops/s 4255.53
+ops/s 4393.44
 
-commits/s 4256.73
+commits/s 4258.56
 aborts/s 0.00
-ops/s 4256.73
+ops/s 4258.56
 
-commits/s 4275.36
+commits/s 4335.61
 aborts/s 0.00
-ops/s 4275.36
+ops/s 4335.61
 
-commits/s 4339.44
+commits/s 4285.61
 aborts/s 0.00
-ops/s 4339.44
+ops/s 4285.61
 
-commits/s 4308.32
+commits/s 4225.67
 aborts/s 0.00
-ops/s 4308.32
+ops/s 4225.67
 
-commits/s 4282.95
+commits/s 4376.75
 aborts/s 0.00
-ops/s 4282.95
+ops/s 4376.75
 
-commits/s 4227.56
+commits/s 4384.64
 aborts/s 0.00
-ops/s 4227.56
+ops/s 4384.64
 
-commits/s 4284.66
+commits/s 4274.21
 aborts/s 0.00
-ops/s 4284.66
+ops/s 4274.21
 
-commits/s 4224.63
+commits/s 4079.92
 aborts/s 0.00
-ops/s 4224.63
+ops/s 4079.92
 
-commits/s 4058.98
+commits/s 4106.15
 aborts/s 0.00
-ops/s 4058.98
+ops/s 4106.15
 
-commits/s 4227.69
+commits/s 4214.35
 aborts/s 0.00
-ops/s 4227.69
+ops/s 4214.35
 
-panic: runtime error: invalid memory address or nil pointer dereference
-[signal SIGSEGV: segmentation violation code=0x1 addr=0x10 pc=0x7b381c]
+commits/s 4273.27
+aborts/s 0.00
+ops/s 4273.27
 
-goroutine 432654 [running]:
-main.(*KVService).Prepare(0x0?, 0xc00535c160?, 0xc00535c158)
-	/mnt/nfs/sid-dev-wait-die/cs6450-labs/kvs/server/woundwait/main.go:345 +0x9c
-reflect.Value.call({0xc000114c60?, 0xc000122248?, 0x13?}, {0x8f1688, 0x4}, {0xc004258ef8, 0x3, 0x3?})
-	/usr/local/go/src/reflect/value.go:581 +0xcc6
-reflect.Value.Call({0xc000114c60?, 0xc000122248?, 0x0?}, {0xc0002ddef8?, 0x0?, 0x0?})
-	/usr/local/go/src/reflect/value.go:365 +0xb9
-net/rpc.(*service).call(0xc0001131c0, 0xccb060, 0xc0000121d0, 0xc0000121e0, 0xc000178480, 0xc000090480, {0x844080?, 0xc00535c160?, 0x0?}, {0x8440c0, ...}, ...)
-	/usr/local/go/src/net/rpc/server.go:383 +0x209
-created by net/rpc.(*Server).ServeCodec in goroutine 5
-	/usr/local/go/src/net/rpc/server.go:480 +0x3de
+commits/s 4290.15
+aborts/s 0.00
+ops/s 4290.15
+
+commits/s 4372.67
+aborts/s 0.00
+ops/s 4372.67
+
+commits/s 4329.14
+aborts/s 0.00
+ops/s 4329.14
+
+commits/s 4276.44
+aborts/s 0.00
+ops/s 4276.44
+
+commits/s 4183.47
+aborts/s 0.00
+ops/s 4183.47
+
+commits/s 4226.56
+aborts/s 0.00
+ops/s 4226.56
+
+commits/s 3055.35
+aborts/s 0.00
+ops/s 3055.35
+
+commits/s 0.00
+aborts/s 0.00
+ops/s 0.00
+

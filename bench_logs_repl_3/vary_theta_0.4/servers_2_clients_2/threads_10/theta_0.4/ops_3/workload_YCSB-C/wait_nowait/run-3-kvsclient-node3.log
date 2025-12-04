@@ -7,7 +7,7 @@ opsPerTx 3
 policy nowait
 threads 5
 === runClient stats ===
-attempts: 84072, commits: 84072, aborts: 0
-latency samples: 84072
-avg(ms): 1.769, median(ms): 1.733, p95(ms): 2.166, p99(ms): 2.543
-CLIENT-SUMMARY: attempts=84072 commits=84072 aborts=0 samples=84072 avg_ms=1.769 median_ms=1.733 p95_ms=2.166 p99_ms=2.543
+attempts: 83847, commits: 83847, aborts: 0
+latency samples: 83847
+avg(ms): 1.773, median(ms): 1.739, p95(ms): 2.167, p99(ms): 2.559
+CLIENT-SUMMARY: attempts=83847 commits=83847 aborts=0 samples=83847 avg_ms=1.773 median_ms=1.739 p95_ms=2.167 p99_ms=2.559

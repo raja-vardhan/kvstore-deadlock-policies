@@ -7,7 +7,7 @@ opsPerTx 3
 policy woundwait
 threads 5
 === runClient stats ===
-attempts: 63476, commits: 63475, aborts: 1
-latency samples: 63475
-avg(ms): 2.354, median(ms): 2.311, p95(ms): 2.862, p99(ms): 3.394
-CLIENT-SUMMARY: attempts=63476 commits=63475 aborts=1 samples=63475 avg_ms=2.354 median_ms=2.311 p95_ms=2.862 p99_ms=3.394
+attempts: 63157, commits: 63157, aborts: 0
+latency samples: 63157
+avg(ms): 2.366, median(ms): 2.322, p95(ms): 2.879, p99(ms): 3.380
+CLIENT-SUMMARY: attempts=63157 commits=63157 aborts=0 samples=63157 avg_ms=2.366 median_ms=2.322 p95_ms=2.879 p99_ms=3.380

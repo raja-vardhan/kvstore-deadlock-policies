@@ -6,10 +6,8 @@ secs 30
 opsPerTx 20
 policy waitdie
 threads 5
-panic: send on closed channel
-
-goroutine 19 [running]:
-main.runClient.func3(0x0?)
-	/mnt/nfs/sid-dev-wait-die/cs6450-labs/kvs/client/main.go:293 +0x41c
-created by main.runClient in goroutine 1
-	/mnt/nfs/sid-dev-wait-die/cs6450-labs/kvs/client/main.go:246 +0x305
+=== runClient stats ===
+attempts: 34871, commits: 13458, aborts: 21413
+latency samples: 13458
+avg(ms): 6.617, median(ms): 6.189, p95(ms): 9.727, p99(ms): 12.680
+CLIENT-SUMMARY: attempts=34871 commits=13458 aborts=21413 samples=13458 avg_ms=6.617 median_ms=6.189 p95_ms=9.727 p99_ms=12.680
