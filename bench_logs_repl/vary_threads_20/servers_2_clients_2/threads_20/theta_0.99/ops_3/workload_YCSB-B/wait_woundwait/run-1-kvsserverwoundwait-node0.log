@@ -1,0 +1,91 @@
+Starting KVS server on :8080
+commits/s 0.00
+aborts/s 0.00
+ops/s 0.00
+
+commits/s 0.00
+aborts/s 0.00
+ops/s 0.00
+
+commits/s 0.00
+aborts/s 0.00
+ops/s 0.00
+
+commits/s 0.00
+aborts/s 0.00
+ops/s 0.00
+
+commits/s 6055.73
+aborts/s 31.00
+ops/s 6086.73
+
+commits/s 9083.61
+aborts/s 36.99
+ops/s 9120.60
+
+commits/s 8966.29
+aborts/s 37.99
+ops/s 9004.28
+
+commits/s 9168.89
+aborts/s 29.00
+ops/s 9197.89
+
+commits/s 9159.29
+aborts/s 34.99
+ops/s 9194.28
+
+commits/s 9097.10
+aborts/s 53.99
+ops/s 9151.09
+
+commits/s 8937.97
+aborts/s 47.99
+ops/s 8985.97
+
+commits/s 8946.02
+aborts/s 58.99
+ops/s 9005.02
+
+commits/s 9233.92
+aborts/s 37.00
+ops/s 9270.91
+
+commits/s 9382.52
+aborts/s 40.99
+ops/s 9423.51
+
+commits/s 9192.03
+aborts/s 55.99
+ops/s 9248.02
+
+commits/s 9117.29
+aborts/s 40.99
+ops/s 9158.28
+
+commits/s 9024.11
+aborts/s 50.99
+ops/s 9075.10
+
+commits/s 9034.27
+aborts/s 62.99
+ops/s 9097.26
+
+commits/s 9037.10
+aborts/s 51.99
+ops/s 9089.10
+
+panic: runtime error: invalid memory address or nil pointer dereference
+[signal SIGSEGV: segmentation violation code=0x1 addr=0x18 pc=0x7b3a57]
+
+goroutine 487760 [running]:
+main.(*KVService).Commit(0xc0000f6700, 0xc001130018, 0x0?)
+	/mnt/nfs/sid-dev-wait-die/cs6450-labs/kvs/server/woundwait/main.go:363 +0xb7
+reflect.Value.call({0xc0000a0ba0?, 0xc000074220?, 0x13?}, {0x8f1688, 0x4}, {0xc00129def8, 0x3, 0x3?})
+	/usr/local/go/src/reflect/value.go:581 +0xcc6
+reflect.Value.Call({0xc0000a0ba0?, 0xc000074220?, 0x0?}, {0xc002d906f8?, 0x0?, 0x0?})
+	/usr/local/go/src/reflect/value.go:365 +0xb9
+net/rpc.(*service).call(0xc00009f1c0, 0xcca060, 0xc000126030, 0xc000126040, 0xc00003a400, 0xc00011c3a0, {0x844100?, 0xc001130018?, 0x0?}, {0x844140, ...}, ...)
+	/usr/local/go/src/net/rpc/server.go:383 +0x209
+created by net/rpc.(*Server).ServeCodec in goroutine 34
+	/usr/local/go/src/net/rpc/server.go:480 +0x3de

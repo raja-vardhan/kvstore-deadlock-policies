@@ -2,9 +2,9 @@
 
 # Variables
 BIN_DIR := bin
-SERVER_BINARY := $(BIN_DIR)/kvsserver
-CLIENT_BINARY := $(BIN_DIR)/kvsclient
 SERVER_PKG := ./kvs/server/$(SERVER_POLICY)
+SERVER_BINARY := $(BIN_DIR)/kvsserver$(SERVER_POLICY)
+CLIENT_BINARY := $(BIN_DIR)/kvsclient
 CLIENT_PKG := ./kvs/client
 
 # Go parameters

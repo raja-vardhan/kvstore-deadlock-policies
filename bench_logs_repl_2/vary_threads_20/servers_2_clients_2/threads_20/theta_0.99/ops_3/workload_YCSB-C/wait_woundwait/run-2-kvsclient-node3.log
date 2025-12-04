@@ -1,0 +1,10 @@
+nowait
+hosts [node0:8080 node1:8080]
+theta 0.99
+workload YCSB-C
+secs 30
+=== runClient stats ===
+attempts: 141902, commits: 141902, aborts: 0
+latency samples: 141902
+avg(ms): 2.093, median(ms): 2.036, p95(ms): 2.651, p99(ms): 3.167
+CLIENT-SUMMARY: attempts=141902 commits=141902 aborts=0 samples=141902 avg_ms=2.093 median_ms=2.036 p95_ms=2.651 p99_ms=3.167

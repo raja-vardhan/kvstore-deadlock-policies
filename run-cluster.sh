@@ -58,7 +58,7 @@ if [ "$#" -gt 5 ]; then
 fi
 
 # Configuration
-LOG_ROOT="${ROOT}/logs"
+LOG_ROOT="${ROOT}/repl_logs"
 
 function cluster_size() {
     /usr/local/etc/emulab/tmcc hostnames | wc -l
@@ -155,7 +155,7 @@ cleanup() {
     echo "Cleaning up processes on all nodes..."
     for node in "${SERVER_NODES[@]}" "${CLIENT_NODES[@]}"; do
         echo "Cleaning up processes on $node..."
-        ${SSH} $node "pkill -f 'kvs(server|client)' || true" 2>/dev/null || true
+        ${SSH} $node "pkill -e -f 'kvs(server$SERVER_POLICY|client)' || true" 2>/dev/null || true
     done
     echo "Cleanup complete."
     echo
@@ -164,55 +164,57 @@ cleanup() {
 # Set trap for cleanup on script exit/interrupt
 trap cleanup EXIT INT TERM
 
-# Initial cleanup to ensure clean state
-echo "Initial cluster cleanup..."
-cleanup
-
 echo "Building the project..."
 make -B SERVER_POLICY="$SERVER_POLICY"
 echo
 
-# Start servers
-for node in "${SERVER_NODES[@]}"; do
-    echo "Starting server on $node..."
-    ${SSH} $node "${ROOT}/bin/kvsserver $SERVER_ARGS > \"$LOG_DIR/kvsserver-$node.log\" 2>&1 &"
+for ((i=0; i<3; i++)); do
+    echo "Run $i"
+    # Initial cleanup to ensure clean state
+    echo "Initial cluster cleanup..."
+    cleanup
+    # Start servers
+    for node in "${SERVER_NODES[@]}"; do
+        echo "Starting server on $node..."
+        ${SSH} $node "${ROOT}/bin/kvsserver$SERVER_POLICY $SERVER_ARGS > \"$LOG_DIR/run-$i-kvsserver$SERVER_POLICY-$node.log\" 2>&1 &"
+    done
+
+    # Give servers time to start
+    sleep 2
+
+    # Start clients with a unique marker for identification
+    # Build comma-separated list of server hosts with port 8080
+    SERVER_HOSTS=""
+    for node in "${SERVER_NODES[@]}"; do
+        if [ -n "$SERVER_HOSTS" ]; then
+            SERVER_HOSTS="$SERVER_HOSTS,$node:8080"
+        else
+            SERVER_HOSTS="$node:8080"
+        fi
+    done
+
+    CLIENT_PIDS=()
+    for node in "${CLIENT_NODES[@]}"; do
+        echo "Starting client on $node..."
+        # Use a marker in the command line to make it easier to identify and wait for
+        CLIENT_MARKER="kvsclient-run-$TS-$node"
+        ${SSH} $node "exec -a '$CLIENT_MARKER' ${ROOT}/bin/kvsclient -policy $SERVER_POLICY -hosts $SERVER_HOSTS $CLIENT_ARGS > \"$LOG_DIR/run-$i-kvsclient-$node.log\" 2>&1" &
+        CLIENT_PIDS+=($!)
+    done
+
+    echo "Waiting for clients to finish..."
+    # Wait for all client SSH sessions to complete
+    for pid in "${CLIENT_PIDS[@]}"; do
+        wait $pid 2>/dev/null || true
+    done
+
+    echo "All clients finished."
+
+    # Final cleanup will be handled by the trap
+    echo "Run complete. Logs in $LOG_DIR"
+    echo
 done
-
-# Give servers time to start
-sleep 2
-
-# Start clients with a unique marker for identification
-# Build comma-separated list of server hosts with port 8080
-SERVER_HOSTS=""
-for node in "${SERVER_NODES[@]}"; do
-    if [ -n "$SERVER_HOSTS" ]; then
-        SERVER_HOSTS="$SERVER_HOSTS,$node:8080"
-    else
-        SERVER_HOSTS="$node:8080"
-    fi
-done
-
-CLIENT_PIDS=()
-for node in "${CLIENT_NODES[@]}"; do
-    echo "Starting client on $node..."
-    # Use a marker in the command line to make it easier to identify and wait for
-    CLIENT_MARKER="kvsclient-run-$TS-$node"
-    ${SSH} $node "exec -a '$CLIENT_MARKER' ${ROOT}/bin/kvsclient -policy $SERVER_POLICY -hosts $SERVER_HOSTS $CLIENT_ARGS > \"$LOG_DIR/kvsclient-$node.log\" 2>&1" &
-    CLIENT_PIDS+=($!)
-done
-
-echo "Waiting for clients to finish..."
-# Wait for all client SSH sessions to complete
-for pid in "${CLIENT_PIDS[@]}"; do
-    wait $pid 2>/dev/null || true
-done
-
-echo "All clients finished."
-
-# Final cleanup will be handled by the trap
-echo "Run complete. Logs in $LOG_DIR"
-echo
 
 # Calculate and display median ops/s from server logs
-python3 report-tput.py
+# python3 report-tput.py
 echo
