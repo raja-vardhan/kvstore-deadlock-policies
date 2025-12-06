@@ -2,20 +2,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_ROOT="${ROOT}/bench_logs_repl_3"
+LOG_ROOT="${ROOT}/final_logs"
 
-# rm -rf $LOG_ROOT
-
-#######################################################################
-# GROUP A — Main Looping Parameters
-#######################################################################
 WORKLOADS=("YCSB-A" "YCSB-B" "YCSB-C")
 WAIT_POLICIES=("woundwait" "waitdie" "nowait")
 REPEATS=3
-
-#######################################################################
-# GROUP B — Non-looping parameters (one varied at a time)
-#######################################################################
 
 ### Baseline values
 BASE_SERVERS=2
@@ -27,7 +18,7 @@ BASE_OPS=3
 SERVERS_LIST=(1 2 3)
 THREADS_LIST=(10 20 30)
 THETA_LIST=(0 0.2 0.4 0.6 0.8 0.99)
-OPS_LIST=(10 20 30)
+OPS_LIST=(3 20)
 #######################################################################
 
 SSH_OPTS="-o StrictHostKeyChecking=no"
@@ -53,9 +44,6 @@ for wait_policy in "${WAIT_POLICIES[@]}"; do
 done
 make build-client
 
-#######################################################################
-# Helper: Thread distribution across clients
-#######################################################################
 calculate_threads() {
     local total=$1
     local clients=$2
@@ -73,9 +61,6 @@ calculate_threads() {
     done
 }
 
-#######################################################################
-# Core Routine — runs one experiment configuration through Group A
-#######################################################################
 run_experiment_group() {
     local exp_name="$1"
     local servers="$2"
@@ -100,7 +85,6 @@ run_experiment_group() {
     declare -a CLIENT_THREADS
     calculate_threads "$threads" "$clients" CLIENT_THREADS
 
-    # Group A permutations
     for workload in "${WORKLOADS[@]}"; do
     for wait_policy in "${WAIT_POLICIES[@]}"; do
     for repeat in $(seq 1 $REPEATS); do
@@ -111,11 +95,9 @@ run_experiment_group() {
 
         LOG_DIR="$LOG_ROOT/$exp_name/servers_${servers}_clients_${clients}/threads_${threads}/theta_${theta}/ops_${ops}/workload_${workload}/wait_${wait_policy}"
         mkdir -p "$LOG_DIR"
-        # REPEAT_LOG="$LOG_DIR/repeat_${repeat}.log"
 
         echo ">>> ($exp_name) workload=$workload wait=$wait_policy repeat=$repeat"
 
-        # server_args="--policy $wait_policy"
         server_args=""
 
         # Per-client args
@@ -148,10 +130,6 @@ run_experiment_group() {
 
     done; done; done
 }
-
-#######################################################################
-# Run Experiment Groups — one parameter varied at a time
-#######################################################################
 
 cleanup
 

@@ -1,0 +1,13 @@
+woundwait
+hosts [node0:8080 node1:8080]
+theta 0.99
+workload YCSB-C
+secs 30
+opsPerTx 3
+policy woundwait
+threads 10
+=== runClient stats ===
+attempts: 111016, commits: 111016, aborts: 0
+latency samples: 111016
+avg(ms): 2.681, median(ms): 2.612, p95(ms): 3.354, p99(ms): 3.967
+CLIENT-SUMMARY: attempts=111016 commits=111016 aborts=0 samples=111016 avg_ms=2.681 median_ms=2.612 p95_ms=3.354 p99_ms=3.967

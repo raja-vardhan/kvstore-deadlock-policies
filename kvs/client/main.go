@@ -296,7 +296,7 @@ func runClient(hosts HostList, done *atomic.Bool, workload string, theta float64
 						}
 
 					}
-					if !txnDone && !done.Load() {
+					if !txnDone {
 						// new attempt for same txn
 						attemptStart = time.Now()
 						atomic.AddUint64(&attempts, 1)

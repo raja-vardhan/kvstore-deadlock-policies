@@ -421,9 +421,6 @@ func (kv *KVService) printStats() {
 
 func main() {
 	fmt.Println("waitdie")
-	go func() {
-		log.Println(http.ListenAndServe("localhost:6060", nil))
-	}()
 	port := flag.String("port", "8080", "Port to run the server on")
 	flag.Parse()
 
